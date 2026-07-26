@@ -1,0 +1,882 @@
+<style>
+  /* ---- Home Assistant native design tokens (light + dark) ---- */
+  :root {
+    --primary: #03a9f4;
+    --primary-contrast: #ffffff;
+    --accent: #ff9800;
+    --green: #4caf50;
+    --red: #f44336;
+    --amber: #ffa726;
+    --app-bg: #f2f4f7;
+    --card-bg: #ffffff;
+    --card-hover: #fbfcfe;
+    --header-bg: #ffffff;
+    --text: #212121;
+    --text-2: #6b7280;
+    --text-3: #9aa2ad;
+    --divider: #e4e7ec;
+    --divider-strong: #d0d5dd;
+    --chip-bg: #eef1f5;
+    --console-bg: #0f1720;
+    --console-text: #c9d4df;
+    --shadow-1: 0 1px 2px rgba(16,24,40,.06), 0 1px 3px rgba(16,24,40,.10);
+    --shadow-2: 0 4px 12px rgba(16,24,40,.10), 0 2px 4px rgba(16,24,40,.06);
+    --radius: 12px;
+    --radius-sm: 8px;
+    --font: 'Roboto', 'Segoe UI', system-ui, -apple-system, sans-serif;
+    --mono: 'Roboto Mono', 'SFMono-Regular', ui-monospace, 'Cascadia Code', monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --app-bg: #101418;
+      --card-bg: #1b1f27;
+      --card-hover: #20252f;
+      --header-bg: #161a20;
+      --text: #e6e8eb;
+      --text-2: #98a2b3;
+      --text-3: #6c7684;
+      --divider: #2a2f3a;
+      --divider-strong: #363c48;
+      --chip-bg: #262b35;
+      --console-bg: #0b0f14;
+      --shadow-1: 0 1px 2px rgba(0,0,0,.3);
+      --shadow-2: 0 6px 18px rgba(0,0,0,.45);
+    }
+  }
+  :root[data-theme="dark"] {
+    --app-bg: #101418; --card-bg: #1b1f27; --card-hover: #20252f; --header-bg: #161a20;
+    --text: #e6e8eb; --text-2: #98a2b3; --text-3: #6c7684; --divider: #2a2f3a;
+    --divider-strong: #363c48; --chip-bg: #262b35; --console-bg: #0b0f14;
+    --shadow-1: 0 1px 2px rgba(0,0,0,.3); --shadow-2: 0 6px 18px rgba(0,0,0,.45);
+  }
+  :root[data-theme="light"] {
+    --app-bg: #f2f4f7; --card-bg: #ffffff; --card-hover: #fbfcfe; --header-bg: #ffffff;
+    --text: #212121; --text-2: #6b7280; --text-3: #9aa2ad; --divider: #e4e7ec;
+    --divider-strong: #d0d5dd; --chip-bg: #eef1f5; --console-bg: #0f1720;
+    --shadow-1: 0 1px 2px rgba(16,24,40,.06), 0 1px 3px rgba(16,24,40,.10);
+    --shadow-2: 0 4px 12px rgba(16,24,40,.10), 0 2px 4px rgba(16,24,40,.06);
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--app-bg); color: var(--text); font-family: var(--font);
+         -webkit-font-smoothing: antialiased; font-size: 14px; line-height: 1.5; }
+  .app { min-height: 100vh; display: flex; flex-direction: column; }
+
+  /* ---- Top app bar ---- */
+  .appbar { position: sticky; top: 0; z-index: 40; background: var(--header-bg);
+            border-bottom: 1px solid var(--divider); }
+  .appbar-main { display: flex; align-items: center; gap: 16px; padding: 10px 22px; }
+  .brand { display: flex; align-items: center; gap: 11px; font-weight: 500; font-size: 19px;
+           letter-spacing: .2px; }
+  .logo { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center;
+          background: linear-gradient(135deg, var(--primary), #0288d1); color: #fff;
+          box-shadow: 0 2px 6px rgba(3,169,244,.4); flex: none; }
+  .logo svg { width: 18px; height: 18px; }
+  .brand small { display: block; font-size: 11px; color: var(--text-2); font-weight: 400;
+                 letter-spacing: .3px; margin-top: -2px; }
+  .spacer { flex: 1; }
+  .search { position: relative; }
+  .search input { width: 230px; height: 38px; border: 1px solid var(--divider-strong);
+    background: var(--app-bg); border-radius: 20px; padding: 0 14px 0 38px; color: var(--text);
+    font-family: var(--font); font-size: 13.5px; outline: none; transition: .15s; }
+  .search input:focus { border-color: var(--primary); background: var(--card-bg);
+    box-shadow: 0 0 0 3px rgba(3,169,244,.12); }
+  .search svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+    width: 17px; height: 17px; color: var(--text-3); pointer-events: none; }
+
+  .btn { height: 38px; border-radius: 20px; border: none; font-family: var(--font);
+    font-size: 13.5px; font-weight: 500; cursor: pointer; display: inline-flex;
+    align-items: center; gap: 7px; padding: 0 18px; transition: .15s; white-space: nowrap; }
+  .btn svg { width: 17px; height: 17px; }
+  .btn-primary { background: var(--primary); color: var(--primary-contrast);
+    box-shadow: 0 1px 3px rgba(3,169,244,.4); }
+  .btn-primary:hover { background: #039be5; box-shadow: 0 2px 8px rgba(3,169,244,.5); }
+  .btn-ghost { background: transparent; color: var(--text-2); padding: 0 10px; }
+  .btn-ghost:hover { background: var(--chip-bg); color: var(--text); }
+  .icon-btn { width: 38px; height: 38px; border-radius: 50%; border: none; background: transparent;
+    color: var(--text-2); cursor: pointer; display: grid; place-items: center; transition: .15s; }
+  .icon-btn:hover { background: var(--chip-bg); color: var(--text); }
+  .icon-btn svg { width: 20px; height: 20px; }
+
+  /* ---- Sub bar: gateway status + filters ---- */
+  .subbar { display: flex; align-items: center; gap: 10px; padding: 9px 22px;
+    border-top: 1px solid var(--divider); flex-wrap: wrap; }
+  .gw { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-2); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .dot.on { background: var(--green); box-shadow: 0 0 0 3px rgba(76,175,80,.18); }
+  .dot.off { background: var(--text-3); }
+  .gw b { color: var(--text); font-weight: 500; }
+  .filters { display: flex; gap: 7px; margin-left: auto; flex-wrap: wrap; }
+  .chip { height: 30px; padding: 0 13px; border-radius: 15px; background: var(--chip-bg);
+    color: var(--text-2); font-size: 12.5px; font-weight: 500; border: 1px solid transparent;
+    cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: .15s; }
+  .chip:hover { color: var(--text); }
+  .chip.active { background: color-mix(in srgb, var(--primary) 15%, transparent);
+    color: var(--primary); border-color: color-mix(in srgb, var(--primary) 35%, transparent); }
+  .chip .n { font-size: 11px; opacity: .8; }
+
+  /* ---- Content ---- */
+  .content { padding: 20px 22px 120px; max-width: 1320px; width: 100%; margin: 0 auto; }
+
+  /* Adopt banner */
+  .adopt { background: linear-gradient(100deg,
+      color-mix(in srgb, var(--primary) 12%, var(--card-bg)),
+      color-mix(in srgb, var(--primary) 4%, var(--card-bg)));
+    border: 1px solid color-mix(in srgb, var(--primary) 30%, transparent);
+    border-radius: var(--radius); padding: 14px 16px; margin-bottom: 20px;
+    display: flex; align-items: center; gap: 14px; }
+  .adopt .badge { width: 40px; height: 40px; border-radius: 10px; background: var(--primary);
+    color: #fff; display: grid; place-items: center; flex: none; }
+  .adopt .badge svg { width: 22px; height: 22px; }
+  .adopt .txt { flex: 1; }
+  .adopt .txt b { font-weight: 500; }
+  .adopt .txt p { margin: 2px 0 0; color: var(--text-2); font-size: 12.5px; }
+
+  .section-label { font-size: 12px; text-transform: uppercase; letter-spacing: .6px;
+    color: var(--text-3); font-weight: 600; margin: 4px 2px 12px; }
+
+  /* Device grid */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 16px; }
+  .card { background: var(--card-bg); border: 1px solid var(--divider); border-radius: var(--radius);
+    box-shadow: var(--shadow-1); overflow: hidden; transition: .18s; display: flex; flex-direction: column; }
+  .card:hover { box-shadow: var(--shadow-2); border-color: var(--divider-strong); transform: translateY(-1px); }
+  .card-top { display: flex; align-items: flex-start; gap: 12px; padding: 16px 16px 12px; }
+  .dev-icon { width: 42px; height: 42px; border-radius: 10px; display: grid; place-items: center;
+    flex: none; color: #fff; }
+  .dev-icon svg { width: 22px; height: 22px; }
+  .ic-light { background: linear-gradient(135deg,#ffb74d,#fb8c00); }
+  .ic-relay { background: linear-gradient(135deg,#4db6ac,#00897b); }
+  .ic-panel { background: linear-gradient(135deg,#7986cb,#3949ab); }
+  .ic-sensor{ background: linear-gradient(135deg,#4fc3f7,#039be5); }
+  .ic-hvac  { background: linear-gradient(135deg,#4dd0e1,#00acc1); }
+  .ic-audio { background: linear-gradient(135deg,#ba68c8,#8e24aa); }
+  .dev-head { flex: 1; min-width: 0; }
+  .dev-name { font-weight: 500; font-size: 15px; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; }
+  .dev-sub { color: var(--text-2); font-size: 12.5px; margin-top: 1px; }
+  .addr { font-family: var(--mono); font-size: 11.5px; background: var(--chip-bg);
+    padding: 1px 6px; border-radius: 5px; color: var(--text-2); }
+
+  .card-meta { display: flex; align-items: center; gap: 8px; padding: 0 16px 14px; flex-wrap: wrap; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px;
+    border-radius: 12px; font-size: 11.5px; font-weight: 500; }
+  .pill.online { background: color-mix(in srgb, var(--green) 15%, transparent); color: #2e7d32; }
+  .pill.offline{ background: var(--chip-bg); color: var(--text-2); }
+  :root[data-theme="dark"] .pill.online, @media (prefers-color-scheme: dark){ .pill.online{ color:#81c784; } }
+  .meta-txt { font-size: 12px; color: var(--text-2); }
+  .meta-sep { width: 3px; height: 3px; border-radius: 50%; background: var(--text-3); }
+
+  .card-actions { margin-top: auto; display: flex; align-items: center; gap: 4px;
+    padding: 8px 8px 8px 12px; border-top: 1px solid var(--divider); }
+  .txt-btn { background: transparent; border: none; color: var(--primary); font-weight: 500;
+    font-family: var(--font); font-size: 13px; cursor: pointer; padding: 8px 12px; border-radius: 8px;
+    display: inline-flex; align-items: center; gap: 6px; transition: .15s; }
+  .txt-btn svg { width: 16px; height: 16px; }
+  .txt-btn:hover { background: color-mix(in srgb, var(--primary) 10%, transparent); }
+  .txt-btn.muted { color: var(--text-2); }
+  .txt-btn.muted:hover { background: var(--chip-bg); color: var(--text); }
+
+  /* ---- Modal (button programmer) ---- */
+  .overlay { position: fixed; inset: 0; background: rgba(16,24,40,.5); backdrop-filter: blur(3px);
+    z-index: 60; display: none; align-items: center; justify-content: center; padding: 24px; }
+  .overlay.show { display: flex; }
+  .modal { background: var(--card-bg); border-radius: 16px; box-shadow: var(--shadow-2);
+    width: min(980px, 100%); max-height: 90vh; display: flex; flex-direction: column; overflow: hidden;
+    border: 1px solid var(--divider); }
+  .modal-head { display: flex; align-items: center; gap: 14px; padding: 18px 20px;
+    border-bottom: 1px solid var(--divider); }
+  .modal-head .dev-icon { width: 38px; height: 38px; }
+  .modal-head h2 { margin: 0; font-size: 17px; font-weight: 500; }
+  .modal-head p { margin: 1px 0 0; font-size: 12.5px; color: var(--text-2); }
+  .modal-body { display: flex; min-height: 0; flex: 1; }
+
+  /* pages tabs */
+  .pgtabs { display: flex; gap: 4px; padding: 12px 20px 0; border-bottom: 1px solid var(--divider); }
+  .pgtab { padding: 9px 15px; border-radius: 8px 8px 0 0; font-size: 13px; font-weight: 500;
+    color: var(--text-2); cursor: pointer; border-bottom: 2px solid transparent; transition: .15s; }
+  .pgtab:hover { color: var(--text); }
+  .pgtab.active { color: var(--primary); border-bottom-color: var(--primary); }
+
+  .prog-wrap { display: flex; flex: 1; min-height: 0; }
+  .btn-grid { flex: 1; padding: 20px; display: grid; grid-template-columns: 1fr 1fr;
+    gap: 12px; align-content: start; overflow: auto; }
+  .pbtn { border: 1px solid var(--divider-strong); background: var(--app-bg); border-radius: 10px;
+    padding: 13px 14px; cursor: pointer; text-align: left; transition: .15s; position: relative;
+    display: flex; align-items: center; gap: 11px; font-family: var(--font); }
+  .pbtn:hover { border-color: var(--primary); background: var(--card-bg); }
+  .pbtn.sel { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 8%, var(--card-bg));
+    box-shadow: 0 0 0 3px rgba(3,169,244,.12); }
+  .pbtn .num { width: 26px; height: 26px; border-radius: 7px; background: var(--chip-bg);
+    display: grid; place-items: center; font-size: 12px; font-weight: 600; color: var(--text-2); flex: none; }
+  .pbtn .b-info { flex: 1; min-width: 0; }
+  .pbtn .b-name { font-size: 13.5px; font-weight: 500; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; }
+  .pbtn .b-fn { font-size: 11.5px; color: var(--text-2); white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; }
+  .pbtn .led { width: 9px; height: 9px; border-radius: 50%; background: var(--divider-strong); flex: none; }
+  .pbtn .led.on { background: var(--primary); box-shadow: 0 0 6px var(--primary); }
+
+  /* editor pane */
+  .editor { width: 340px; border-left: 1px solid var(--divider); padding: 18px 20px; overflow: auto;
+    background: var(--app-bg); flex: none; }
+  .editor h3 { margin: 0 0 3px; font-size: 14px; font-weight: 600; }
+  .editor .hint { font-size: 12px; color: var(--text-2); margin-bottom: 16px; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 11.5px; text-transform: uppercase; letter-spacing: .4px;
+    color: var(--text-2); font-weight: 600; margin-bottom: 5px; }
+  .field select, .field input[type=number], .field input[type=text] { width: 100%; height: 38px;
+    border: 1px solid var(--divider-strong); background: var(--card-bg); border-radius: 8px;
+    padding: 0 11px; color: var(--text); font-family: var(--font); font-size: 13.5px; outline: none; }
+  .field select:focus, .field input:focus { border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(3,169,244,.12); }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 9px 0;
+    border-top: 1px solid var(--divider); }
+  .toggle-row span { font-size: 13px; }
+  .sw { width: 40px; height: 23px; border-radius: 12px; background: var(--divider-strong);
+    position: relative; cursor: pointer; transition: .18s; flex: none; }
+  .sw::after { content: ''; position: absolute; top: 2px; left: 2px; width: 19px; height: 19px;
+    border-radius: 50%; background: #fff; transition: .18s; box-shadow: 0 1px 2px rgba(0,0,0,.3); }
+  .sw.on { background: var(--primary); } .sw.on::after { left: 19px; }
+
+  .ha-note { margin-top: 14px; padding: 11px 12px; border-radius: 9px;
+    background: color-mix(in srgb, var(--primary) 8%, transparent);
+    border: 1px dashed color-mix(in srgb, var(--primary) 35%, transparent); font-size: 12px; }
+  .ha-note code { font-family: var(--mono); font-size: 11.5px; background: var(--card-bg);
+    padding: 1px 5px; border-radius: 4px; color: var(--primary); }
+  .editor .btn-primary { width: 100%; justify-content: center; margin-top: 16px; }
+
+  /* ---- Console (live monitor) ---- */
+  .console { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; background: var(--console-bg);
+    color: var(--console-text); font-family: var(--mono); box-shadow: 0 -6px 20px rgba(0,0,0,.3);
+    transform: translateY(calc(100% - 42px)); transition: transform .28s cubic-bezier(.4,0,.2,1); }
+  .console.open { transform: translateY(0); }
+  .console-bar { height: 42px; display: flex; align-items: center; gap: 12px; padding: 0 16px;
+    cursor: pointer; border-bottom: 1px solid rgba(255,255,255,.08); }
+  .console-bar .t { font-family: var(--font); font-size: 13px; font-weight: 500; color: #fff;
+    display: flex; align-items: center; gap: 9px; }
+  .live { width: 7px; height: 7px; border-radius: 50%; background: var(--green);
+    animation: pulse 1.6s infinite; }
+  @keyframes pulse { 0%,100%{ opacity:1; } 50%{ opacity:.3; } }
+  .console-tools { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+  .console-tools .icon-btn { color: #8b97a5; width: 30px; height: 30px; }
+  .console-tools .icon-btn:hover { background: rgba(255,255,255,.08); color: #fff; }
+  .console-tools .icon-btn svg { width: 17px; height: 17px; }
+  .log { height: 260px; overflow: auto; padding: 10px 16px; font-size: 12px; line-height: 1.7; }
+  .log .ln { white-space: pre-wrap; word-break: break-word; }
+  .log .ts { color: #5b6b7a; }
+  .log .src { color: #6ec7ff; }
+  .log .op { color: #ffd479; }
+  .log .op.ctrl { color: #7ee787; }
+  .log .op.stat { color: #c9a6ff; }
+  .log .data { color: #9db2c4; }
+
+  .devmenu { position: fixed; z-index: 70; background: var(--card-bg); border: 1px solid var(--divider-strong);
+    border-radius: 10px; box-shadow: var(--shadow-2); padding: 6px; display: none; min-width: 170px; }
+  .devmenu.show { display: block; }
+  .devmenu button { display: flex; width: 100%; border: none; background: transparent; color: var(--text);
+    font-family: var(--font); font-size: 13.5px; padding: 9px 12px; border-radius: 7px; cursor: pointer;
+    text-align: left; align-items: center; gap: 9px; }
+  .devmenu button:hover { background: var(--chip-bg); }
+  .devmenu button svg { width: 16px; height: 16px; color: var(--text-2); }
+
+  .toast { position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: #323a45; color: #fff; padding: 12px 18px; border-radius: 10px; font-size: 13.5px;
+    box-shadow: var(--shadow-2); opacity: 0; transition: .25s; z-index: 80; display: flex;
+    align-items: center; gap: 10px; pointer-events: none; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast svg { width: 18px; height: 18px; color: var(--green); }
+
+  @media (max-width: 760px) {
+    .appbar-main { flex-wrap: wrap; gap: 10px; padding: 10px 14px; }
+    .search { order: 5; flex: 1 1 100%; }
+    .search input { width: 100%; font-size: 16px; }
+    .content { padding: 16px 14px 84px; }
+    .subbar { padding: 9px 14px; }
+    .brand small { display: none; }
+
+    /* full-screen, single-scroll modal so every field is reachable */
+    .overlay { padding: 0; align-items: stretch; }
+    .modal { width: 100%; height: 100dvh; max-height: 100dvh; border-radius: 0; border: none; }
+    .modal-head { position: sticky; top: 0; z-index: 2; background: var(--card-bg);
+      padding-top: max(16px, env(safe-area-inset-top)); }
+    .pgtabs { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .prog-wrap { flex-direction: column; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+    .btn-grid { grid-template-columns: 1fr 1fr; overflow: visible; flex: none; padding: 16px; }
+    .editor { width: auto; border-left: none; border-top: 1px solid var(--divider);
+      overflow: visible; flex: none; padding-bottom: max(24px, env(safe-area-inset-bottom)); }
+    /* 16px form controls avoid the iOS auto-zoom that blocks tapping */
+    .field select, .field input[type=number], .field input[type=text] { font-size: 16px; height: 44px; }
+    .sw { width: 46px; height: 27px; } .sw::after { width: 23px; height: 23px; }
+    .sw.on::after { left: 21px; }
+    .toggle-row { padding: 13px 0; }
+    /* keep the console out of the way on phones */
+    .console .log { height: 45dvh; }
+  }
+  @media (max-width: 430px) { .btn-grid { grid-template-columns: 1fr; } }
+</style>
+
+<div class="app">
+  <!-- ============ APP BAR ============ -->
+  <header class="appbar">
+    <div class="appbar-main">
+      <div class="brand">
+        <div class="logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+               stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 7h16M4 12h16M4 17h16"/><circle cx="8" cy="7" r="1.6" fill="currentColor"/>
+            <circle cx="15" cy="12" r="1.6" fill="currentColor"/><circle cx="10" cy="17" r="1.6" fill="currentColor"/>
+          </svg>
+        </div>
+        <div>Smart-G4 Builder<small>S-BUS device programmer</small></div>
+      </div>
+      <div class="spacer"></div>
+      <div class="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+        <input id="search" placeholder="Search devices…" oninput="renderDevices()">
+      </div>
+      <button class="btn btn-primary" onclick="scanBus()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 0 1 8-8"/>
+          <path d="M20 12a8 8 0 0 1-8 8"/><path d="M12 2v4M12 18v4"/></svg>
+        Scan bus
+      </button>
+      <button class="icon-btn" title="Toggle theme" onclick="toggleTheme()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/>
+          <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19"/></svg>
+      </button>
+      <button class="icon-btn" title="Settings"><svg viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 8 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H2a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 3.6 8a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 8 3.6h.09A1.65 1.65 0 0 0 9 2.09V2a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15 3.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 20.4 8v.09a1.65 1.65 0 0 0 1.51 1H22a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+    </div>
+    <div class="subbar">
+      <span class="gw" id="gwline"><span class="dot off"></span>Gateway <b>—</b></span>
+      <span class="gw" style="color:var(--text-3)">·</span>
+      <span class="gw" id="devcount"><b>—</b> devices</span>
+      <div class="filters" id="filters"></div>
+    </div>
+  </header>
+
+  <!-- ============ CONTENT ============ -->
+  <main class="content">
+    <div class="adopt" id="adopt" style="display:none">
+      <div class="badge">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+      </div>
+      <div class="txt">
+        <b id="adopt-title">New modules found on the bus</b>
+        <p>Un-named devices answered the scan. Take control to name them and manage them here.</p>
+      </div>
+      <button class="btn btn-primary" onclick="adopt()">Take control</button>
+    </div>
+
+    <div class="section-label">Devices on the bus</div>
+    <div class="grid" id="grid"></div>
+  </main>
+
+  <!-- ============ BUTTON PROGRAMMER MODAL ============ -->
+  <div class="overlay" id="overlay" onclick="if(event.target===this)closeModal()">
+    <div class="modal">
+      <div class="modal-head">
+        <div class="dev-icon ic-panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/>
+          <path d="M8 6h8M8 10h8M8 14h4"/></svg></div>
+        <div style="flex:1">
+          <h2 id="m-name">DDP Panel — Living Room</h2>
+          <p id="m-sub">1.20 · Dynamic Display Panel · 4 pages · FW 2.34</p>
+        </div>
+        <button class="icon-btn" onclick="closeModal()"><svg viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+      </div>
+      <div class="pgtabs" id="pgtabs"></div>
+      <div class="prog-wrap">
+        <div class="btn-grid" id="btngrid"></div>
+        <aside class="editor" id="editor"></aside>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ LIVE CONSOLE ============ -->
+  <div class="console open" id="console">
+    <div class="console-bar" onclick="toggleConsole(event)">
+      <span class="t"><span class="live"></span>Bus monitor</span>
+      <span style="font-family:var(--font);font-size:12px;color:#8b97a5" id="logcount">live</span>
+      <div class="console-tools" onclick="event.stopPropagation()">
+        <button class="icon-btn" id="pausebtn" title="Pause" onclick="togglePause()">
+          <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/></svg></button>
+        <button class="icon-btn" title="Clear" onclick="clearLog()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></button>
+        <button class="icon-btn" title="Collapse" onclick="toggleConsole(event)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg></button>
+      </div>
+    </div>
+    <div class="log" id="log"></div>
+  </div>
+
+  <div class="devmenu" id="devmenu"></div>
+
+  <div class="toast" id="toast"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+    <span id="toast-txt"></span></div>
+</div>
+
+<script>
+/* ---------------- icons ---------------- */
+const ICON = {
+  light:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1v.2h6v-.2c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2z"/></svg>',
+  relay:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M8 6v12M14 10l2 2-2 2"/></svg>',
+  panel:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 6h8M8 10h8M8 14h4"/></svg>',
+  sensor:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>',
+  hvac:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="9" rx="2"/><path d="M6 18v1M12 18v2M18 18v1"/></svg>',
+  audio:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V6l10-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></svg>',
+};
+const TYPE_META = {
+  light:{cls:'ic-light'}, relay:{cls:'ic-relay'}, panel:{cls:'ic-panel'},
+  sensor:{cls:'ic-sensor'}, hvac:{cls:'ic-hvac'}, audio:{cls:'ic-audio'},
+};
+
+/* ---------------- real bus state (via the add-on API) ---------------- */
+const FN_TYPES = ['Invalid','Single channel','Scene','Sequence','Universal switch','Curtain','Panel / AC'];
+let DEVICES = [];          // decorated /api/devices results
+let CONFIG = null;         // /api/config
+const LIVE = {};           // "subnet.device" -> {channels:[{number,status}], seen}
+let activeFilter='all', current=null, curPage=0, curBtn=0, curCh=0;
+
+async function api(path){
+  const r = await fetch(path);
+  if(!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+async function apiSend(target, opcode, data){
+  const r = await fetch('api/send', {method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({target, opcode, data})});
+  const j = await r.json().catch(()=>({ok:false,error:`HTTP ${r.status}`}));
+  if(!j.ok) throw new Error(j.error || 'send failed');
+}
+
+/* Map the S-BUS device-type code onto a UI category. Grows as modules
+   are identified on the bus; unknown types render as generic modules. */
+function uiType(d){
+  const t = parseInt(d.device_type, 16);
+  if(t === 0x0095) return 'panel';
+  if(t === 0x07D3 || t === 0x01B8 || t === 0x139C) return 'relay';
+  if(t === 0x0119) return 'sensor';   // room modules, model unconfirmed
+  return 'sensor';
+}
+function mkButtons(){ return Array.from({length:6},()=>({
+  name:'—', fn:0, sub:1, dev:1, p1:1, p2:100, p3:0, save:true, dim:false, led:false, ha:false })); }
+function decorate(d){
+  return { id:d.address, addr:d.address, raw:d, type:uiType(d),
+    name: d.remark || `Module ${d.address}`, online:true,
+    pages: uiType(d)==='panel' ? [mkButtons(),mkButtons(),mkButtons(),mkButtons()] : null };
+}
+
+/* ---------------- filters ---------------- */
+const FILTERS=[['all','All'],['panel','Panels'],['light','Lights'],['relay','Relays'],
+  ['hvac','Climate'],['sensor','Sensors'],['audio','Audio']];
+function renderFilters(){
+  document.getElementById('filters').innerHTML = FILTERS.map(([k,l])=>{
+    const n = k==='all'?DEVICES.length:DEVICES.filter(d=>d.type===k).length;
+    if(k!=='all'&&n===0) return '';
+    return `<button class="chip ${activeFilter===k?'active':''}" onclick="setFilter('${k}')">${l}<span class="n">${n}</span></button>`;
+  }).join('');
+}
+function setFilter(k){ activeFilter=k; renderFilters(); renderDevices(); }
+
+/* ---------------- device grid ---------------- */
+function renderDevices(){
+  const q=(document.getElementById('search').value||'').toLowerCase();
+  const list=DEVICES.filter(d=>(activeFilter==='all'||d.type===activeFilter)
+    && (d.name.toLowerCase().includes(q)||d.addr.includes(q)));
+  document.getElementById('devcount').innerHTML=`<b>${DEVICES.length}</b> devices`;
+  document.getElementById('grid').innerHTML = list.map(d=>{
+    const m=TYPE_META[d.type];
+    const live=LIVE[d.addr];
+    const detail = d.type==='panel' ? `${d.pages.length} pages`
+      : live ? `${live.channels.length} channels · ${live.channels.filter(c=>c.status).length} on`
+      : (d.raw.opcodes_seen||[]).length ? `seen: ${d.raw.opcodes_seen.join(', ')}` : 'no traffic yet';
+    return `<div class="card">
+      <div class="card-top">
+        <div class="dev-icon ${m.cls}">${ICON[d.type]}</div>
+        <div class="dev-head">
+          <div class="dev-name">${d.name}</div>
+          <div class="dev-sub"><span class="addr">${d.addr}</span> · ${d.raw.type_name}</div>
+        </div>
+        <button class="icon-btn" title="More" onclick="openDevMenu(event,'${d.id}')">
+          <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg></button>
+      </div>
+      <div class="card-meta">
+        <span class="pill ${d.online?'online':'offline'}"><span class="dot ${d.online?'on':'off'}"></span>${d.online?'Online':'Offline'}</span>
+        <span class="meta-txt">${d.raw.device_type}</span><span class="meta-sep"></span>
+        <span class="meta-txt">${detail}</span>
+      </div>
+      <div class="card-actions">
+        <button class="txt-btn" onclick="editDevice('${d.id}')">
+          ${d.type==='panel'
+            ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg> Program'
+            : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg> Control'}
+        </button>
+        <button class="txt-btn muted" onclick="openConsole()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 6-6 6 6 6M16 6l6 6-6 6"/></svg> Monitor</button>
+      </div>
+    </div>`;
+  }).join('') || `<div style="color:var(--text-2);padding:30px 4px">${DEVICES.length?'No devices match.':'No devices yet — press “Scan bus”.'}</div>`;
+}
+
+/* ---------------- button programmer ---------------- */
+async function editDevice(id){
+  const d=DEVICES.find(x=>x.id===id); current=d;
+  if(d.type!=='panel'){ openChannelControl(d); return; }
+  curBtn=0;
+  document.getElementById('m-name').textContent=d.name;
+  document.getElementById('m-sub').textContent=`${d.addr} · ${d.raw.type_name}`;
+  document.getElementById('pgtabs').innerHTML='';
+  document.getElementById('overlay').classList.add('show');
+  document.getElementById('btngrid').innerHTML='<div style="color:var(--text-2);padding:20px">Loading panel configuration…</div>';
+  document.getElementById('editor').innerHTML='';
+  try{
+    const r = await fetch(`api/panel/buttons?target=${d.addr}`);
+    const j = await r.json();
+    if(!j.ok) throw new Error(j.error||'decode failed');
+    current.panel = j;
+    document.getElementById('m-sub').textContent=`${d.addr} · ${d.raw.type_name} · from ${j.backup_file}`;
+    renderButtons(); renderEditor();
+  }catch(e){
+    document.getElementById('btngrid').innerHTML=`
+      <div style="grid-column:1/-1;color:var(--text-2);padding:20px">
+        <p style="margin:0 0 12px">${e.message}.</p>
+        <p style="margin:0 0 16px">The button programmer reads the panel's flash image.
+        Run a backup (~5 min) and re-open this dialog.</p>
+        <button class="btn btn-primary" onclick="closeModal();menuBackup('${d.id}')">Backup this panel now</button>
+      </div>`;
+  }
+}
+
+/* ---------------- channel control (dimmers / relays) ---------------- */
+let chLevel=100, chFade=0;
+function channelsOf(d){
+  const live=LIVE[d.addr];
+  if(live) return live.channels;
+  return Array.from({length:4},(_,i)=>({number:i+1, status:null}));
+}
+function openChannelControl(d){
+  curCh=0;
+  document.getElementById('m-name').textContent=d.name;
+  document.getElementById('m-sub').textContent=`${d.addr} · ${d.raw.type_name}`;
+  document.getElementById('pgtabs').innerHTML='';
+  renderChannels(); renderChannelEditor();
+  document.getElementById('overlay').classList.add('show');
+}
+function renderChannels(){
+  if(!current || current.type==='panel') return;
+  const chs=channelsOf(current);
+  if(curCh>=chs.length) curCh=0;
+  document.getElementById('btngrid').innerHTML=chs.map((c,i)=>`
+    <button class="pbtn ${i===curCh?'sel':''}" onclick="selCh(${i})">
+      <span class="num">${c.number}</span>
+      <span class="b-info"><span class="b-name">Channel ${c.number}</span>
+        <span class="b-fn">${c.status===null?'state unknown':(c.status?'On':'Off')}</span></span>
+      <span class="led ${c.status?'on':''}"></span>
+    </button>`).join('');
+}
+function selCh(i){ curCh=i; renderChannels(); renderChannelEditor(); }
+function renderChannelEditor(){
+  const c=channelsOf(current)[curCh];
+  document.getElementById('editor').innerHTML=`
+    <h3>Channel ${c.number}</h3>
+    <div class="hint">Live control — sends Single channel control (0x0031) on the bus.
+      State updates from the module's own status broadcasts.</div>
+    <div class="row2">
+      <div class="field"><label>Level %</label>
+        <input type="number" min="0" max="100" value="${chLevel}" onchange="chLevel=+this.value"></div>
+      <div class="field"><label>Fade (s)</label>
+        <input type="number" min="0" max="3600" value="${chFade}" onchange="chFade=+this.value"></div>
+    </div>
+    <button class="btn btn-primary" onclick="sendChannel(${c.number}, chLevel)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4 20-7z"/></svg>
+      Set level</button>
+    <button class="btn btn-primary" style="background:var(--green)" onclick="sendChannel(${c.number},100)">Turn on</button>
+    <button class="btn btn-primary" style="background:var(--text-3)" onclick="sendChannel(${c.number},0)">Turn off</button>`;
+}
+async function sendChannel(n, level){
+  try{
+    await apiSend(current.addr, 0x0031, {channel:n, level, time:chFade});
+    toast(`Sent: ${current.addr} channel ${n} → ${level}%`);
+  }catch(e){ toast(`Send failed: ${e.message}`); }
+}
+function renderButtons(){
+  const btns=current.panel.buttons;
+  document.getElementById('btngrid').innerHTML=btns.map((b,i)=>`
+    <button class="pbtn ${i===curBtn?'sel':''}" onclick="selBtn(${i})">
+      <span class="num">${b.index}</span>
+      <span class="b-info"><span class="b-name">${b.label||'—'}</span>
+        <span class="b-fn">${b.commands.length? b.commands.length===1
+          ? `${b.commands[0].function_name} → ${b.commands[0].target}`
+          : `${b.commands.length} commands` : 'unassigned'}</span></span>
+      <span class="led ${b.commands.length?'on':''}"></span>
+    </button>`).join('');
+}
+function selBtn(i){ curBtn=i;
+  [...document.querySelectorAll('.pbtn')].forEach((t,x)=>t.classList.toggle('sel',x===i));
+  renderEditor(); }
+function renderEditor(){
+  const b=current.panel.buttons[curBtn];
+  const rows = b.commands.map((c,i)=>`
+    <div style="border:1px solid var(--divider);border-radius:8px;padding:9px;margin-bottom:9px">
+      <div class="row2" style="margin-bottom:8px">
+        <div class="field" style="margin:0"><label>Target</label>
+          <input type="text" value="${c.target}" onchange="updCmd(${i},'target',this.value)"></div>
+        <div class="field" style="margin:0"><label>Channel</label>
+          <input type="number" min="1" max="255" value="${c.p1}" onchange="updCmd(${i},'p1',+this.value)"></div>
+      </div>
+      <div class="row2">
+        <div class="field" style="margin:0"><label>Level %</label>
+          <input type="number" min="0" max="100" value="${c.p2}" onchange="updCmd(${i},'p2',+this.value)"></div>
+        <div class="field" style="margin:0"><label>Fade (s)</label>
+          <input type="number" min="0" max="3600" value="${c.p3}" onchange="updCmd(${i},'p3',+this.value)"></div>
+      </div>
+      <div style="display:flex;gap:4px;margin-top:7px">
+        <button class="txt-btn" style="padding:4px 10px" onclick="testCmd(${i})">Test</button>
+        <button class="txt-btn muted" style="padding:4px 10px" onclick="delCmd(${i})">Remove</button>
+      </div>
+    </div>`).join('') || '<div class="hint">No commands assigned to this button.</div>';
+  document.getElementById('editor').innerHTML=`
+    <h3>Button ${b.index}</h3>
+    <div class="field"><label>Label (max 20 chars)</label>
+      <input type="text" maxlength="20" value="${b.label||''}" onchange="current.panel.buttons[curBtn].label=this.value;renderButtons()"></div>
+    ${rows}
+    <button class="txt-btn" onclick="addCmd()">+ Add command</button>
+    <button class="btn btn-primary" onclick="writeButton()" style="margin-top:14px">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4 20-7z"/></svg>
+      Write to panel</button>
+    <div class="ha-note" style="margin-top:12px">Writes are verified: changed flash pages are
+      staged (0xDC15), committed (0xDC16), then read back and compared. The commit is still
+      experimental — it stays disabled until <code>enable_flash_write</code> is turned on in
+      the add-on options. “Test” sends a command on the bus right now, like a real press.</div>`;
+}
+function updCmd(i,k,v){ current.panel.buttons[curBtn].commands[i][k]=v; renderButtons(); }
+function delCmd(i){ current.panel.buttons[curBtn].commands.splice(i,1); renderButtons(); renderEditor(); }
+function addCmd(){ current.panel.buttons[curBtn].commands.push(
+  {function:'0x59', function_name:'single_channel', target:'1.1', p1:1, p2:100, p3:0});
+  renderButtons(); renderEditor(); }
+async function testCmd(i){
+  const c=current.panel.buttons[curBtn].commands[i];
+  if(c.function!=='0x59'){ toast(`Function ${c.function_name} not sendable yet`); return; }
+  try{
+    await apiSend(c.target, 0x0031, {channel:c.p1, level:c.p2, time:c.p3});
+    toast(`Sent: ${c.target} ch ${c.p1} → ${c.p2}%`);
+  }catch(e){ toast(`Send failed: ${e.message}`); }
+}
+async function writeButton(){
+  const b=current.panel.buttons[curBtn];
+  const body = {target: current.addr, index: b.index, label: b.label,
+    commands: b.commands.map(c=>({function:c.function, target:c.target, p1:c.p1, p2:c.p2, p3:c.p3}))};
+  const post = async payload => {
+    const r = await fetch('api/panel/write', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+    return r.json();
+  };
+  try{
+    const dry = await post(body);                       // dry run first
+    if(!dry.ok) throw new Error(dry.error||'failed');
+    if(!dry.changed_pages.length){ toast('No changes to write'); return; }
+    if(!confirm(`Write button ${b.index} to ${current.addr}?\n`
+      + `${dry.changed_pages.length} flash page(s) will be rewritten: ${dry.changed_pages.join(', ')}.\n`
+      + `A verified backup exists and pages are read back after writing.`)) return;
+    const res = await post({...body, confirm:true});
+    if(!res.ok) throw new Error(res.error||'failed');
+    toast(res.verified ? `Button ${b.index} written and verified ✓`
+        : `Write sent but verification FAILED — check the panel and restore from backup if needed`);
+  }catch(e){ toast(`Write failed: ${e.message}`); }
+}
+function closeModal(){ document.getElementById('overlay').classList.remove('show'); }
+
+/* ---------------- console (live WS monitor) ---------------- */
+let paused=false, logCount=0, ws=null, renderQueued=false;
+function pad(n){ return String(n).padStart(2,'0'); }
+function stamp(){ const d=new Date();
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(Math.floor(d.getMilliseconds()/10))}`; }
+function opClass(op){ return /Response|Broadcast|Status|Read/i.test(op) ? 'stat' : 'ctrl'; }
+function fmtData(data){
+  if(data==null || data==='') return '';
+  if(typeof data==='string') return data;
+  if(data.channels) return (data.areas||[]).map(a=>`area ${a.number} scene ${a.scene}`).join(' ')
+    + ' · ch [' + data.channels.map(c=>c.status?'1':'0').join(',') + ']';
+  return JSON.stringify(data);
+}
+function wsUrl(){
+  const base = location.pathname.endsWith('/') ? location.pathname : location.pathname + '/';
+  return (location.protocol==='https:'?'wss://':'ws://') + location.host + base + 'api/monitor';
+}
+function connectWS(){
+  ws = new WebSocket(wsUrl());
+  ws.onopen = () => pushLog('—','—','monitor_connected','stat','');
+  ws.onmessage = e => {
+    let f; try{ f = JSON.parse(e.data); }catch{ return; }
+    if(!paused) pushLog(f.src, f.dst, f.op, opClass(f.op), fmtData(f.data));
+    if(f.op==='SceneStatusBroadcast' && f.data && f.data.channels){
+      LIVE[f.src] = {channels: f.data.channels, seen: Date.now()};
+      const known = DEVICES.some(d=>d.addr===f.src);
+      if(known) scheduleRender();
+    }
+  };
+  ws.onclose = () => { pushLog('—','—','monitor_disconnected','stat','retrying in 3 s'); setTimeout(connectWS, 3000); };
+  ws.onerror = () => ws.close();
+}
+function scheduleRender(){
+  if(renderQueued) return;
+  renderQueued = true;
+  setTimeout(()=>{ renderQueued=false; renderDevices();
+    if(document.getElementById('overlay').classList.contains('show')
+       && current && current.type!=='panel'){ renderChannels(); } }, 1000);
+}
+function pushLog(src,dst,op,cls,data){
+  const el=document.getElementById('log');
+  const atBottom = el.scrollHeight-el.scrollTop-el.clientHeight < 40;
+  const div=document.createElement('div'); div.className='ln';
+  div.innerHTML=`<span class="ts">${stamp()}</span>  <span class="src">${src.padStart(7)} → ${dst.padEnd(7)}</span>  <span class="op ${cls}">${op}</span>  <span class="data">${data}</span>`;
+  el.appendChild(div); logCount++;
+  while(el.children.length>200) el.removeChild(el.firstChild);
+  if(atBottom) el.scrollTop=el.scrollHeight;
+  document.getElementById('logcount').textContent=`${logCount} frames`;
+}
+function togglePause(){ paused=!paused;
+  document.getElementById('pausebtn').innerHTML= paused
+    ? '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>'
+    : '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/></svg>'; }
+function clearLog(){ document.getElementById('log').innerHTML=''; logCount=0;
+  document.getElementById('logcount').textContent='live'; }
+function toggleConsole(e){ if(e)e.stopPropagation();
+  document.getElementById('console').classList.toggle('open'); }
+function openConsole(){ document.getElementById('console').classList.add('open'); }
+
+/* ---------------- misc ---------------- */
+let scanning=false;
+async function scanBus(){
+  if(scanning) return;
+  scanning=true;
+  toast('Scanning bus (0x000E + 0xF003 bursts, ~45 s — replies are lossy)…');
+  document.getElementById('devcount').innerHTML='<b>…</b> scanning';
+  try{
+    const found = await api('api/devices');
+    DEVICES = found.map(decorate);
+    renderFilters(); renderDevices(); updateAdopt();
+    toast(`Scan complete — ${DEVICES.length} device(s) found`);
+  }catch(err){
+    toast(`Scan failed: ${err.message}`);
+    document.getElementById('devcount').innerHTML=`<b>${DEVICES.length}</b> devices`;
+  }
+  scanning=false;
+}
+function updateAdopt(){
+  const unnamed = DEVICES.filter(d=>!d.raw.remark);
+  const el = document.getElementById('adopt');
+  el.style.display = unnamed.length ? 'flex' : 'none';
+  if(unnamed.length) document.getElementById('adopt-title').textContent =
+    `${unnamed.length} un-named module${unnamed.length>1?'s':''} found on the bus`;
+}
+async function adopt(){
+  const unnamed = DEVICES.filter(d=>!d.raw.remark);
+  for(const d of unnamed){
+    const name = prompt(`Name for module ${d.addr} (${d.raw.type_name}) — max 20 chars, empty to skip:`, '');
+    if(name === null) break;
+    if(!name.trim()) continue;
+    await doRename(d.addr, name.trim(), false);
+  }
+  scanBus();
+}
+
+/* ---------------- device menu (rename / backup) ---------------- */
+function openDevMenu(ev, id){
+  ev.stopPropagation();
+  const d = DEVICES.find(x=>x.id===id);
+  const m = document.getElementById('devmenu');
+  m.innerHTML = `
+    <button onclick="menuRename('${id}')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+      Rename…</button>
+    <button onclick="menuBackup('${id}')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+      Backup flash → .sbd</button>`;
+  m.classList.add('show');
+  const pad = 8, w = 190;
+  m.style.left = Math.min(ev.clientX, window.innerWidth - w - pad) + 'px';
+  m.style.top = Math.min(ev.clientY, window.innerHeight - 110) + 'px';
+}
+document.addEventListener('click', ()=>document.getElementById('devmenu').classList.remove('show'));
+
+function menuRename(id){
+  const d = DEVICES.find(x=>x.id===id);
+  const name = prompt(`New name for ${d.addr} (max 20 chars):`, d.raw.remark || '');
+  if(name && name.trim()) doRename(d.addr, name.trim(), true);
+}
+async function doRename(addr, name, rescan){
+  try{
+    const r = await fetch('api/rename', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({target: addr, remark: name})});
+    const j = await r.json();
+    if(!j.ok) throw new Error(j.error||'failed');
+    toast(`${addr} renamed to “${name}”`);
+    if(rescan) scanBus();
+  }catch(e){ toast(`Rename failed: ${e.message}`); }
+}
+
+let backupTimer = null;
+async function menuBackup(id){
+  const d = DEVICES.find(x=>x.id===id);
+  try{
+    const r = await fetch('api/backup', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({target: d.addr})});
+    const j = await r.json();
+    if(!j.ok) throw new Error(j.error||'failed');
+    toast(`Backing up ${d.addr} — ${j.total} flash pages…`);
+    clearInterval(backupTimer);
+    backupTimer = setInterval(pollBackup, 2000);
+  }catch(e){ toast(`Backup failed: ${e.message}`); }
+}
+async function pollBackup(){
+  try{
+    const s = await api('api/backup/status');
+    if(s.running){
+      document.getElementById('devcount').innerHTML =
+        `<b>${DEVICES.length}</b> devices · backing up ${s.target}: ${s.done}/${s.total}`;
+      return;
+    }
+    clearInterval(backupTimer); backupTimer = null;
+    document.getElementById('devcount').innerHTML = `<b>${DEVICES.length}</b> devices`;
+    if(s.error) toast(`Backup of ${s.target} failed: ${s.error}`);
+    else if(s.file) toast(`Backup saved: ${s.file}`);
+  }catch{ /* transient */ }
+}
+async function loadConfig(){
+  try{
+    CONFIG = await api('api/config');
+    document.getElementById('gwline').innerHTML =
+      `<span class="dot on"></span>Gateway <b>${CONFIG.gateway}</b> · S-BUS UDP :6000 · as ${CONFIG.subnet}.${CONFIG.device}`;
+  }catch{
+    document.getElementById('gwline').innerHTML =
+      `<span class="dot off"></span>Gateway <b>unreachable</b>`;
+  }
+}
+let toastTimer;
+function toast(msg){ const t=document.getElementById('toast');
+  document.getElementById('toast-txt').textContent=msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('show'),2600); }
+function toggleTheme(){ const r=document.documentElement;
+  const cur=r.getAttribute('data-theme')|| (matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');
+  r.setAttribute('data-theme', cur==='dark'?'light':'dark'); }
+
+/* ---------------- init ---------------- */
+renderFilters(); renderDevices();
+// On phones the bottom console would cover content — start it collapsed.
+if (window.innerWidth <= 760) document.getElementById('console').classList.remove('open');
+loadConfig();
+connectWS();
+scanBus();
+</script>

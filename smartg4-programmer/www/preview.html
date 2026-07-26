@@ -1,0 +1,628 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>Smart-G4 Builder</title><style>body{margin:0}</style></head><body><style>
+  /* ---- Home Assistant native design tokens (light + dark) ---- */
+  :root {
+    --primary: #03a9f4;
+    --primary-contrast: #ffffff;
+    --accent: #ff9800;
+    --green: #4caf50;
+    --red: #f44336;
+    --amber: #ffa726;
+    --app-bg: #f2f4f7;
+    --card-bg: #ffffff;
+    --card-hover: #fbfcfe;
+    --header-bg: #ffffff;
+    --text: #212121;
+    --text-2: #6b7280;
+    --text-3: #9aa2ad;
+    --divider: #e4e7ec;
+    --divider-strong: #d0d5dd;
+    --chip-bg: #eef1f5;
+    --console-bg: #0f1720;
+    --console-text: #c9d4df;
+    --shadow-1: 0 1px 2px rgba(16,24,40,.06), 0 1px 3px rgba(16,24,40,.10);
+    --shadow-2: 0 4px 12px rgba(16,24,40,.10), 0 2px 4px rgba(16,24,40,.06);
+    --radius: 12px;
+    --radius-sm: 8px;
+    --font: 'Roboto', 'Segoe UI', system-ui, -apple-system, sans-serif;
+    --mono: 'Roboto Mono', 'SFMono-Regular', ui-monospace, 'Cascadia Code', monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --app-bg: #101418;
+      --card-bg: #1b1f27;
+      --card-hover: #20252f;
+      --header-bg: #161a20;
+      --text: #e6e8eb;
+      --text-2: #98a2b3;
+      --text-3: #6c7684;
+      --divider: #2a2f3a;
+      --divider-strong: #363c48;
+      --chip-bg: #262b35;
+      --console-bg: #0b0f14;
+      --shadow-1: 0 1px 2px rgba(0,0,0,.3);
+      --shadow-2: 0 6px 18px rgba(0,0,0,.45);
+    }
+  }
+  :root[data-theme="dark"] {
+    --app-bg: #101418; --card-bg: #1b1f27; --card-hover: #20252f; --header-bg: #161a20;
+    --text: #e6e8eb; --text-2: #98a2b3; --text-3: #6c7684; --divider: #2a2f3a;
+    --divider-strong: #363c48; --chip-bg: #262b35; --console-bg: #0b0f14;
+    --shadow-1: 0 1px 2px rgba(0,0,0,.3); --shadow-2: 0 6px 18px rgba(0,0,0,.45);
+  }
+  :root[data-theme="light"] {
+    --app-bg: #f2f4f7; --card-bg: #ffffff; --card-hover: #fbfcfe; --header-bg: #ffffff;
+    --text: #212121; --text-2: #6b7280; --text-3: #9aa2ad; --divider: #e4e7ec;
+    --divider-strong: #d0d5dd; --chip-bg: #eef1f5; --console-bg: #0f1720;
+    --shadow-1: 0 1px 2px rgba(16,24,40,.06), 0 1px 3px rgba(16,24,40,.10);
+    --shadow-2: 0 4px 12px rgba(16,24,40,.10), 0 2px 4px rgba(16,24,40,.06);
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--app-bg); color: var(--text); font-family: var(--font);
+         -webkit-font-smoothing: antialiased; font-size: 14px; line-height: 1.5; }
+  .app { min-height: 100vh; display: flex; flex-direction: column; }
+
+  /* ---- Top app bar ---- */
+  .appbar { position: sticky; top: 0; z-index: 40; background: var(--header-bg);
+            border-bottom: 1px solid var(--divider); }
+  .appbar-main { display: flex; align-items: center; gap: 16px; padding: 10px 22px; }
+  .brand { display: flex; align-items: center; gap: 11px; font-weight: 500; font-size: 19px;
+           letter-spacing: .2px; }
+  .logo { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center;
+          background: linear-gradient(135deg, var(--primary), #0288d1); color: #fff;
+          box-shadow: 0 2px 6px rgba(3,169,244,.4); flex: none; }
+  .logo svg { width: 18px; height: 18px; }
+  .brand small { display: block; font-size: 11px; color: var(--text-2); font-weight: 400;
+                 letter-spacing: .3px; margin-top: -2px; }
+  .spacer { flex: 1; }
+  .search { position: relative; }
+  .search input { width: 230px; height: 38px; border: 1px solid var(--divider-strong);
+    background: var(--app-bg); border-radius: 20px; padding: 0 14px 0 38px; color: var(--text);
+    font-family: var(--font); font-size: 13.5px; outline: none; transition: .15s; }
+  .search input:focus { border-color: var(--primary); background: var(--card-bg);
+    box-shadow: 0 0 0 3px rgba(3,169,244,.12); }
+  .search svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+    width: 17px; height: 17px; color: var(--text-3); pointer-events: none; }
+
+  .btn { height: 38px; border-radius: 20px; border: none; font-family: var(--font);
+    font-size: 13.5px; font-weight: 500; cursor: pointer; display: inline-flex;
+    align-items: center; gap: 7px; padding: 0 18px; transition: .15s; white-space: nowrap; }
+  .btn svg { width: 17px; height: 17px; }
+  .btn-primary { background: var(--primary); color: var(--primary-contrast);
+    box-shadow: 0 1px 3px rgba(3,169,244,.4); }
+  .btn-primary:hover { background: #039be5; box-shadow: 0 2px 8px rgba(3,169,244,.5); }
+  .btn-ghost { background: transparent; color: var(--text-2); padding: 0 10px; }
+  .btn-ghost:hover { background: var(--chip-bg); color: var(--text); }
+  .icon-btn { width: 38px; height: 38px; border-radius: 50%; border: none; background: transparent;
+    color: var(--text-2); cursor: pointer; display: grid; place-items: center; transition: .15s; }
+  .icon-btn:hover { background: var(--chip-bg); color: var(--text); }
+  .icon-btn svg { width: 20px; height: 20px; }
+
+  /* ---- Sub bar: gateway status + filters ---- */
+  .subbar { display: flex; align-items: center; gap: 10px; padding: 9px 22px;
+    border-top: 1px solid var(--divider); flex-wrap: wrap; }
+  .gw { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-2); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .dot.on { background: var(--green); box-shadow: 0 0 0 3px rgba(76,175,80,.18); }
+  .dot.off { background: var(--text-3); }
+  .gw b { color: var(--text); font-weight: 500; }
+  .filters { display: flex; gap: 7px; margin-left: auto; flex-wrap: wrap; }
+  .chip { height: 30px; padding: 0 13px; border-radius: 15px; background: var(--chip-bg);
+    color: var(--text-2); font-size: 12.5px; font-weight: 500; border: 1px solid transparent;
+    cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: .15s; }
+  .chip:hover { color: var(--text); }
+  .chip.active { background: color-mix(in srgb, var(--primary) 15%, transparent);
+    color: var(--primary); border-color: color-mix(in srgb, var(--primary) 35%, transparent); }
+  .chip .n { font-size: 11px; opacity: .8; }
+
+  /* ---- Content ---- */
+  .content { padding: 20px 22px 120px; max-width: 1320px; width: 100%; margin: 0 auto; }
+
+  /* Adopt banner */
+  .adopt { background: linear-gradient(100deg,
+      color-mix(in srgb, var(--primary) 12%, var(--card-bg)),
+      color-mix(in srgb, var(--primary) 4%, var(--card-bg)));
+    border: 1px solid color-mix(in srgb, var(--primary) 30%, transparent);
+    border-radius: var(--radius); padding: 14px 16px; margin-bottom: 20px;
+    display: flex; align-items: center; gap: 14px; }
+  .adopt .badge { width: 40px; height: 40px; border-radius: 10px; background: var(--primary);
+    color: #fff; display: grid; place-items: center; flex: none; }
+  .adopt .badge svg { width: 22px; height: 22px; }
+  .adopt .txt { flex: 1; }
+  .adopt .txt b { font-weight: 500; }
+  .adopt .txt p { margin: 2px 0 0; color: var(--text-2); font-size: 12.5px; }
+
+  .section-label { font-size: 12px; text-transform: uppercase; letter-spacing: .6px;
+    color: var(--text-3); font-weight: 600; margin: 4px 2px 12px; }
+
+  /* Device grid */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 16px; }
+  .card { background: var(--card-bg); border: 1px solid var(--divider); border-radius: var(--radius);
+    box-shadow: var(--shadow-1); overflow: hidden; transition: .18s; display: flex; flex-direction: column; }
+  .card:hover { box-shadow: var(--shadow-2); border-color: var(--divider-strong); transform: translateY(-1px); }
+  .card-top { display: flex; align-items: flex-start; gap: 12px; padding: 16px 16px 12px; }
+  .dev-icon { width: 42px; height: 42px; border-radius: 10px; display: grid; place-items: center;
+    flex: none; color: #fff; }
+  .dev-icon svg { width: 22px; height: 22px; }
+  .ic-light { background: linear-gradient(135deg,#ffb74d,#fb8c00); }
+  .ic-relay { background: linear-gradient(135deg,#4db6ac,#00897b); }
+  .ic-panel { background: linear-gradient(135deg,#7986cb,#3949ab); }
+  .ic-sensor{ background: linear-gradient(135deg,#4fc3f7,#039be5); }
+  .ic-hvac  { background: linear-gradient(135deg,#4dd0e1,#00acc1); }
+  .ic-audio { background: linear-gradient(135deg,#ba68c8,#8e24aa); }
+  .dev-head { flex: 1; min-width: 0; }
+  .dev-name { font-weight: 500; font-size: 15px; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; }
+  .dev-sub { color: var(--text-2); font-size: 12.5px; margin-top: 1px; }
+  .addr { font-family: var(--mono); font-size: 11.5px; background: var(--chip-bg);
+    padding: 1px 6px; border-radius: 5px; color: var(--text-2); }
+
+  .card-meta { display: flex; align-items: center; gap: 8px; padding: 0 16px 14px; flex-wrap: wrap; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px;
+    border-radius: 12px; font-size: 11.5px; font-weight: 500; }
+  .pill.online { background: color-mix(in srgb, var(--green) 15%, transparent); color: #2e7d32; }
+  .pill.offline{ background: var(--chip-bg); color: var(--text-2); }
+  :root[data-theme="dark"] .pill.online, @media (prefers-color-scheme: dark){ .pill.online{ color:#81c784; } }
+  .meta-txt { font-size: 12px; color: var(--text-2); }
+  .meta-sep { width: 3px; height: 3px; border-radius: 50%; background: var(--text-3); }
+
+  .card-actions { margin-top: auto; display: flex; align-items: center; gap: 4px;
+    padding: 8px 8px 8px 12px; border-top: 1px solid var(--divider); }
+  .txt-btn { background: transparent; border: none; color: var(--primary); font-weight: 500;
+    font-family: var(--font); font-size: 13px; cursor: pointer; padding: 8px 12px; border-radius: 8px;
+    display: inline-flex; align-items: center; gap: 6px; transition: .15s; }
+  .txt-btn svg { width: 16px; height: 16px; }
+  .txt-btn:hover { background: color-mix(in srgb, var(--primary) 10%, transparent); }
+  .txt-btn.muted { color: var(--text-2); }
+  .txt-btn.muted:hover { background: var(--chip-bg); color: var(--text); }
+
+  /* ---- Modal (button programmer) ---- */
+  .overlay { position: fixed; inset: 0; background: rgba(16,24,40,.5); backdrop-filter: blur(3px);
+    z-index: 60; display: none; align-items: center; justify-content: center; padding: 24px; }
+  .overlay.show { display: flex; }
+  .modal { background: var(--card-bg); border-radius: 16px; box-shadow: var(--shadow-2);
+    width: min(980px, 100%); max-height: 90vh; display: flex; flex-direction: column; overflow: hidden;
+    border: 1px solid var(--divider); }
+  .modal-head { display: flex; align-items: center; gap: 14px; padding: 18px 20px;
+    border-bottom: 1px solid var(--divider); }
+  .modal-head .dev-icon { width: 38px; height: 38px; }
+  .modal-head h2 { margin: 0; font-size: 17px; font-weight: 500; }
+  .modal-head p { margin: 1px 0 0; font-size: 12.5px; color: var(--text-2); }
+  .modal-body { display: flex; min-height: 0; flex: 1; }
+
+  /* pages tabs */
+  .pgtabs { display: flex; gap: 4px; padding: 12px 20px 0; border-bottom: 1px solid var(--divider); }
+  .pgtab { padding: 9px 15px; border-radius: 8px 8px 0 0; font-size: 13px; font-weight: 500;
+    color: var(--text-2); cursor: pointer; border-bottom: 2px solid transparent; transition: .15s; }
+  .pgtab:hover { color: var(--text); }
+  .pgtab.active { color: var(--primary); border-bottom-color: var(--primary); }
+
+  .prog-wrap { display: flex; flex: 1; min-height: 0; }
+  .btn-grid { flex: 1; padding: 20px; display: grid; grid-template-columns: 1fr 1fr;
+    gap: 12px; align-content: start; overflow: auto; }
+  .pbtn { border: 1px solid var(--divider-strong); background: var(--app-bg); border-radius: 10px;
+    padding: 13px 14px; cursor: pointer; text-align: left; transition: .15s; position: relative;
+    display: flex; align-items: center; gap: 11px; font-family: var(--font); }
+  .pbtn:hover { border-color: var(--primary); background: var(--card-bg); }
+  .pbtn.sel { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 8%, var(--card-bg));
+    box-shadow: 0 0 0 3px rgba(3,169,244,.12); }
+  .pbtn .num { width: 26px; height: 26px; border-radius: 7px; background: var(--chip-bg);
+    display: grid; place-items: center; font-size: 12px; font-weight: 600; color: var(--text-2); flex: none; }
+  .pbtn .b-info { flex: 1; min-width: 0; }
+  .pbtn .b-name { font-size: 13.5px; font-weight: 500; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; }
+  .pbtn .b-fn { font-size: 11.5px; color: var(--text-2); white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; }
+  .pbtn .led { width: 9px; height: 9px; border-radius: 50%; background: var(--divider-strong); flex: none; }
+  .pbtn .led.on { background: var(--primary); box-shadow: 0 0 6px var(--primary); }
+
+  /* editor pane */
+  .editor { width: 340px; border-left: 1px solid var(--divider); padding: 18px 20px; overflow: auto;
+    background: var(--app-bg); flex: none; }
+  .editor h3 { margin: 0 0 3px; font-size: 14px; font-weight: 600; }
+  .editor .hint { font-size: 12px; color: var(--text-2); margin-bottom: 16px; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 11.5px; text-transform: uppercase; letter-spacing: .4px;
+    color: var(--text-2); font-weight: 600; margin-bottom: 5px; }
+  .field select, .field input[type=number], .field input[type=text] { width: 100%; height: 38px;
+    border: 1px solid var(--divider-strong); background: var(--card-bg); border-radius: 8px;
+    padding: 0 11px; color: var(--text); font-family: var(--font); font-size: 13.5px; outline: none; }
+  .field select:focus, .field input:focus { border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(3,169,244,.12); }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 9px 0;
+    border-top: 1px solid var(--divider); }
+  .toggle-row span { font-size: 13px; }
+  .sw { width: 40px; height: 23px; border-radius: 12px; background: var(--divider-strong);
+    position: relative; cursor: pointer; transition: .18s; flex: none; }
+  .sw::after { content: ''; position: absolute; top: 2px; left: 2px; width: 19px; height: 19px;
+    border-radius: 50%; background: #fff; transition: .18s; box-shadow: 0 1px 2px rgba(0,0,0,.3); }
+  .sw.on { background: var(--primary); } .sw.on::after { left: 19px; }
+
+  .ha-note { margin-top: 14px; padding: 11px 12px; border-radius: 9px;
+    background: color-mix(in srgb, var(--primary) 8%, transparent);
+    border: 1px dashed color-mix(in srgb, var(--primary) 35%, transparent); font-size: 12px; }
+  .ha-note code { font-family: var(--mono); font-size: 11.5px; background: var(--card-bg);
+    padding: 1px 5px; border-radius: 4px; color: var(--primary); }
+  .editor .btn-primary { width: 100%; justify-content: center; margin-top: 16px; }
+
+  /* ---- Console (live monitor) ---- */
+  .console { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; background: var(--console-bg);
+    color: var(--console-text); font-family: var(--mono); box-shadow: 0 -6px 20px rgba(0,0,0,.3);
+    transform: translateY(calc(100% - 42px)); transition: transform .28s cubic-bezier(.4,0,.2,1); }
+  .console.open { transform: translateY(0); }
+  .console-bar { height: 42px; display: flex; align-items: center; gap: 12px; padding: 0 16px;
+    cursor: pointer; border-bottom: 1px solid rgba(255,255,255,.08); }
+  .console-bar .t { font-family: var(--font); font-size: 13px; font-weight: 500; color: #fff;
+    display: flex; align-items: center; gap: 9px; }
+  .live { width: 7px; height: 7px; border-radius: 50%; background: var(--green);
+    animation: pulse 1.6s infinite; }
+  @keyframes pulse { 0%,100%{ opacity:1; } 50%{ opacity:.3; } }
+  .console-tools { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+  .console-tools .icon-btn { color: #8b97a5; width: 30px; height: 30px; }
+  .console-tools .icon-btn:hover { background: rgba(255,255,255,.08); color: #fff; }
+  .console-tools .icon-btn svg { width: 17px; height: 17px; }
+  .log { height: 260px; overflow: auto; padding: 10px 16px; font-size: 12px; line-height: 1.7; }
+  .log .ln { white-space: pre-wrap; word-break: break-word; }
+  .log .ts { color: #5b6b7a; }
+  .log .src { color: #6ec7ff; }
+  .log .op { color: #ffd479; }
+  .log .op.ctrl { color: #7ee787; }
+  .log .op.stat { color: #c9a6ff; }
+  .log .data { color: #9db2c4; }
+
+  .toast { position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: #323a45; color: #fff; padding: 12px 18px; border-radius: 10px; font-size: 13.5px;
+    box-shadow: var(--shadow-2); opacity: 0; transition: .25s; z-index: 80; display: flex;
+    align-items: center; gap: 10px; pointer-events: none; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast svg { width: 18px; height: 18px; color: var(--green); }
+
+  @media (max-width: 760px) {
+    .appbar-main { flex-wrap: wrap; gap: 10px; padding: 10px 14px; }
+    .search { order: 5; flex: 1 1 100%; }
+    .search input { width: 100%; font-size: 16px; }
+    .content { padding: 16px 14px 84px; }
+    .subbar { padding: 9px 14px; }
+    .brand small { display: none; }
+
+    /* full-screen, single-scroll modal so every field is reachable */
+    .overlay { padding: 0; align-items: stretch; }
+    .modal { width: 100%; height: 100dvh; max-height: 100dvh; border-radius: 0; border: none; }
+    .modal-head { position: sticky; top: 0; z-index: 2; background: var(--card-bg);
+      padding-top: max(16px, env(safe-area-inset-top)); }
+    .pgtabs { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .prog-wrap { flex-direction: column; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+    .btn-grid { grid-template-columns: 1fr 1fr; overflow: visible; flex: none; padding: 16px; }
+    .editor { width: auto; border-left: none; border-top: 1px solid var(--divider);
+      overflow: visible; flex: none; padding-bottom: max(24px, env(safe-area-inset-bottom)); }
+    /* 16px form controls avoid the iOS auto-zoom that blocks tapping */
+    .field select, .field input[type=number], .field input[type=text] { font-size: 16px; height: 44px; }
+    .sw { width: 46px; height: 27px; } .sw::after { width: 23px; height: 23px; }
+    .sw.on::after { left: 21px; }
+    .toggle-row { padding: 13px 0; }
+    /* keep the console out of the way on phones */
+    .console .log { height: 45dvh; }
+  }
+  @media (max-width: 430px) { .btn-grid { grid-template-columns: 1fr; } }
+</style>
+
+<div class="app">
+  <!-- ============ APP BAR ============ -->
+  <header class="appbar">
+    <div class="appbar-main">
+      <div class="brand">
+        <div class="logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+               stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 7h16M4 12h16M4 17h16"/><circle cx="8" cy="7" r="1.6" fill="currentColor"/>
+            <circle cx="15" cy="12" r="1.6" fill="currentColor"/><circle cx="10" cy="17" r="1.6" fill="currentColor"/>
+          </svg>
+        </div>
+        <div>Smart-G4 Builder<small>S-BUS device programmer</small></div>
+      </div>
+      <div class="spacer"></div>
+      <div class="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+        <input id="search" placeholder="Search devices…" oninput="renderDevices()">
+      </div>
+      <button class="btn btn-primary" onclick="scanBus()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 0 1 8-8"/>
+          <path d="M20 12a8 8 0 0 1-8 8"/><path d="M12 2v4M12 18v4"/></svg>
+        Scan bus
+      </button>
+      <button class="icon-btn" title="Toggle theme" onclick="toggleTheme()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/>
+          <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19"/></svg>
+      </button>
+      <button class="icon-btn" title="Settings"><svg viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 8 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H2a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 3.6 8a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 8 3.6h.09A1.65 1.65 0 0 0 9 2.09V2a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15 3.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 20.4 8v.09a1.65 1.65 0 0 0 1.51 1H22a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+    </div>
+    <div class="subbar">
+      <span class="gw"><span class="dot on"></span>Gateway <b>192.168.10.250</b> · RSIP · online</span>
+      <span class="gw" style="color:var(--text-3)">·</span>
+      <span class="gw" id="devcount"><b>—</b> devices</span>
+      <div class="filters" id="filters"></div>
+    </div>
+  </header>
+
+  <!-- ============ CONTENT ============ -->
+  <main class="content">
+    <div class="adopt" id="adopt">
+      <div class="badge">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+      </div>
+      <div class="txt">
+        <b>2 new modules found on the bus</b>
+        <p>Un-named devices answered the scan. Take control to name them and manage them here.</p>
+      </div>
+      <button class="btn btn-primary" onclick="adopt()">Take control</button>
+    </div>
+
+    <div class="section-label">Configured devices</div>
+    <div class="grid" id="grid"></div>
+  </main>
+
+  <!-- ============ BUTTON PROGRAMMER MODAL ============ -->
+  <div class="overlay" id="overlay" onclick="if(event.target===this)closeModal()">
+    <div class="modal">
+      <div class="modal-head">
+        <div class="dev-icon ic-panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/>
+          <path d="M8 6h8M8 10h8M8 14h4"/></svg></div>
+        <div style="flex:1">
+          <h2 id="m-name">DDP Panel — Living Room</h2>
+          <p id="m-sub">1.20 · Dynamic Display Panel · 4 pages · FW 2.34</p>
+        </div>
+        <button class="icon-btn" onclick="closeModal()"><svg viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+      </div>
+      <div class="pgtabs" id="pgtabs"></div>
+      <div class="prog-wrap">
+        <div class="btn-grid" id="btngrid"></div>
+        <aside class="editor" id="editor"></aside>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ LIVE CONSOLE ============ -->
+  <div class="console open" id="console">
+    <div class="console-bar" onclick="toggleConsole(event)">
+      <span class="t"><span class="live"></span>Bus monitor</span>
+      <span style="font-family:var(--font);font-size:12px;color:#8b97a5" id="logcount">live</span>
+      <div class="console-tools" onclick="event.stopPropagation()">
+        <button class="icon-btn" id="pausebtn" title="Pause" onclick="togglePause()">
+          <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/></svg></button>
+        <button class="icon-btn" title="Clear" onclick="clearLog()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></button>
+        <button class="icon-btn" title="Collapse" onclick="toggleConsole(event)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg></button>
+      </div>
+    </div>
+    <div class="log" id="log"></div>
+  </div>
+
+  <div class="toast" id="toast"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+    <span id="toast-txt"></span></div>
+</div>
+
+<script>
+/* ---------------- icons ---------------- */
+const ICON = {
+  light:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1v.2h6v-.2c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2z"/></svg>',
+  relay:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M8 6v12M14 10l2 2-2 2"/></svg>',
+  panel:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 6h8M8 10h8M8 14h4"/></svg>',
+  sensor:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>',
+  hvac:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="9" rx="2"/><path d="M6 18v1M12 18v2M18 18v1"/></svg>',
+  audio:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V6l10-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></svg>',
+};
+const TYPE_META = {
+  light:{cls:'ic-light',label:'6ch Dimmer'}, relay:{cls:'ic-relay',label:'12ch Relay'},
+  panel:{cls:'ic-panel',label:'Dynamic Display Panel'}, sensor:{cls:'ic-sensor',label:'9-in-1 Sensor'},
+  hvac:{cls:'ic-hvac',label:'HVAC Controller'}, audio:{cls:'ic-audio',label:'Z-Audio 2'},
+};
+
+/* ---------------- mock bus ---------------- */
+const FN_TYPES = ['Invalid','Single channel','Scene','Sequence','Universal switch','Curtain','Panel / AC'];
+function mkButtons(names){ return names.map((n,i)=>({
+  name:n, fn: i%7, sub:1, dev:75, p1:i+1, p2:100, p3:0, save:true, dim:i%2===0, led:true, ha:false })); }
+const DEVICES = [
+  {id:'d1', type:'panel', name:'DDP Panel — Living Room', addr:'1.20', fw:'2.34', online:true,
+   pages:[ mkButtons(['Ceiling','Lamps','Movie','All off','Blinds','A/C']),
+           mkButtons(['Read','Dinner','Bright','Off','Fan','—']),
+           mkButtons(['Scene 1','Scene 2','Scene 3','Scene 4','—','—']),
+           mkButtons(['Away','Home','Night','Wake','—','—']) ]},
+  {id:'d2', type:'light', name:'Dimmer — Living Room', addr:'1.75', fw:'1.9', online:true, ch:6},
+  {id:'d3', type:'relay', name:'Relay — Utility', addr:'1.100', fw:'1.9', online:true, ch:12},
+  {id:'d4', type:'hvac', name:'HVAC — Bedroom', addr:'1.30', fw:'2.1', online:true, ch:1},
+  {id:'d5', type:'sensor', name:'Sensor — Hallway', addr:'1.50', fw:'3.0', online:true, ch:9},
+  {id:'d6', type:'audio', name:'Z-Audio — Kitchen', addr:'1.234', fw:'2.7', online:false, ch:4},
+  {id:'d7', type:'panel', name:'DDP Panel — Bedroom', addr:'1.21', fw:'2.34', online:true,
+   pages:[ mkButtons(['Main','Side','Read','Off','Blinds','A/C']), mkButtons(['—','—','—','—','—','—']),
+           mkButtons(['—','—','—','—','—','—']), mkButtons(['—','—','—','—','—','—']) ]},
+];
+let activeFilter='all', current=null, curPage=0, curBtn=0;
+
+/* ---------------- filters ---------------- */
+const FILTERS=[['all','All'],['panel','Panels'],['light','Lights'],['relay','Relays'],
+  ['hvac','Climate'],['sensor','Sensors'],['audio','Audio']];
+function renderFilters(){
+  document.getElementById('filters').innerHTML = FILTERS.map(([k,l])=>{
+    const n = k==='all'?DEVICES.length:DEVICES.filter(d=>d.type===k).length;
+    if(k!=='all'&&n===0) return '';
+    return `<button class="chip ${activeFilter===k?'active':''}" onclick="setFilter('${k}')">${l}<span class="n">${n}</span></button>`;
+  }).join('');
+}
+function setFilter(k){ activeFilter=k; renderFilters(); renderDevices(); }
+
+/* ---------------- device grid ---------------- */
+function renderDevices(){
+  const q=(document.getElementById('search').value||'').toLowerCase();
+  const list=DEVICES.filter(d=>(activeFilter==='all'||d.type===activeFilter)
+    && (d.name.toLowerCase().includes(q)||d.addr.includes(q)));
+  document.getElementById('devcount').innerHTML=`<b>${DEVICES.length}</b> devices`;
+  document.getElementById('grid').innerHTML = list.map(d=>{
+    const m=TYPE_META[d.type];
+    const detail = d.type==='panel' ? `${d.pages.reduce((a,p)=>a+p.filter(b=>b.name!=='—').length,0)} buttons`
+                 : `${d.ch} channels`;
+    return `<div class="card">
+      <div class="card-top">
+        <div class="dev-icon ${m.cls}">${ICON[d.type]}</div>
+        <div class="dev-head">
+          <div class="dev-name">${d.name}</div>
+          <div class="dev-sub"><span class="addr">${d.addr}</span> · ${m.label}</div>
+        </div>
+        <button class="icon-btn" title="More" onclick="toast('Rename · Backup · Restore · Identify · Change address · Delete')">
+          <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg></button>
+      </div>
+      <div class="card-meta">
+        <span class="pill ${d.online?'online':'offline'}"><span class="dot ${d.online?'on':'off'}"></span>${d.online?'Online':'Offline'}</span>
+        <span class="meta-txt">FW ${d.fw}</span><span class="meta-sep"></span>
+        <span class="meta-txt">${detail}</span>
+      </div>
+      <div class="card-actions">
+        <button class="txt-btn" onclick="editDevice('${d.id}')">
+          ${d.type==='panel'
+            ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg> Program'
+            : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg> Edit'}
+        </button>
+        <button class="txt-btn muted" onclick="openConsole()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 6-6 6 6 6M16 6l6 6-6 6"/></svg> Monitor</button>
+      </div>
+    </div>`;
+  }).join('') || `<div style="color:var(--text-2);padding:30px 4px">No devices match.</div>`;
+}
+
+/* ---------------- button programmer ---------------- */
+function editDevice(id){
+  const d=DEVICES.find(x=>x.id===id); current=d;
+  if(d.type!=='panel'){ toast(`Editor for ${d.name} — channels, remarks & limits`); return; }
+  curPage=0; curBtn=0;
+  document.getElementById('m-name').textContent=d.name;
+  document.getElementById('m-sub').textContent=`${d.addr} · Dynamic Display Panel · ${d.pages.length} pages · FW ${d.fw}`;
+  document.getElementById('pgtabs').innerHTML=d.pages.map((_,i)=>
+    `<div class="pgtab ${i===0?'active':''}" onclick="selPage(${i})">Page ${i+1}</div>`).join('');
+  renderButtons(); renderEditor();
+  document.getElementById('overlay').classList.add('show');
+}
+function selPage(i){ curPage=i; curBtn=0;
+  [...document.querySelectorAll('.pgtab')].forEach((t,x)=>t.classList.toggle('active',x===i));
+  renderButtons(); renderEditor(); }
+function renderButtons(){
+  const btns=current.pages[curPage];
+  document.getElementById('btngrid').innerHTML=btns.map((b,i)=>`
+    <button class="pbtn ${i===curBtn?'sel':''}" onclick="selBtn(${i})">
+      <span class="num">${i+1}</span>
+      <span class="b-info"><span class="b-name">${b.name}</span>
+        <span class="b-fn">${FN_TYPES[b.fn]}${b.fn?` → ${b.sub}.${b.dev}`:''}</span></span>
+      <span class="led ${b.led?'on':''}"></span>
+    </button>`).join('');
+}
+function selBtn(i){ curBtn=i;
+  [...document.querySelectorAll('.pbtn')].forEach((t,x)=>t.classList.toggle('sel',x===i));
+  renderEditor(); }
+const P_LABELS = {
+  1:['Channel','Brightness %','Fade (s)'], 2:['Area','Scene',null], 3:['Area','Sequence',null],
+  4:['Switch #','State (0/1)',null], 5:['Channel','0=stop 1=open 2=close',null],
+  6:['Panel type','Value',null],
+};
+function renderEditor(){
+  const b=current.pages[curPage][curBtn];
+  const labels=P_LABELS[b.fn]||[];
+  const haEvent=`smartg4_button_${current.addr.replace('.','_')}_p${curPage+1}_b${curBtn+1}`;
+  document.getElementById('editor').innerHTML=`
+    <h3>Button ${curBtn+1} — ${b.name}</h3>
+    <div class="hint">Page ${curPage+1} · what this button does when pressed</div>
+    <div class="field"><label>Remark (name)</label>
+      <input type="text" value="${b.name==='—'?'':b.name}" oninput="upd('name',this.value||'—')"></div>
+    <div class="field"><label>Function type</label>
+      <select onchange="upd('fn',+this.value)">${FN_TYPES.map((f,i)=>
+        `<option value="${i}" ${b.fn===i?'selected':''}>${f}</option>`).join('')}</select></div>
+    ${b.fn?`<div class="row2">
+      <div class="field"><label>Target subnet</label><input type="number" min="0" max="255" value="${b.sub}" onchange="upd('sub',+this.value)"></div>
+      <div class="field"><label>Target device</label><input type="number" min="1" max="255" value="${b.dev}" onchange="upd('dev',+this.value)"></div>
+    </div>
+    ${labels[0]?`<div class="field"><label>${labels[0]}</label><input type="number" value="${b.p1}" onchange="upd('p1',+this.value)"></div>`:''}
+    ${labels[1]?`<div class="field"><label>${labels[1]}</label><input type="number" value="${b.p2}" onchange="upd('p2',+this.value)"></div>`:''}
+    ${labels[2]?`<div class="field"><label>${labels[2]}</label><input type="number" value="${b.p3}" onchange="upd('p3',+this.value)"></div>`:''}`:''}
+    <div class="toggle-row"><span>Save last dim value</span><div class="sw ${b.save?'on':''}" onclick="tog('save')"></div></div>
+    <div class="toggle-row"><span>Dimming enabled</span><div class="sw ${b.dim?'on':''}" onclick="tog('dim')"></div></div>
+    <div class="toggle-row"><span>Button LED feedback</span><div class="sw ${b.led?'on':''}" onclick="tog('led')"></div></div>
+    <div class="toggle-row" style="border-bottom:1px solid var(--divider)"><span>Control from Home Assistant</span><div class="sw ${b.ha?'on':''}" onclick="tog('ha')"></div></div>
+    ${b.ha?`<div class="ha-note">Press fires HA event <code>${haEvent}</code>. Assign its behaviour in a Home Assistant automation — no vendor software.</div>`:''}
+    <button class="btn btn-primary" onclick="sendBtn()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4 20-7z"/></svg>
+      Write to panel</button>`;
+}
+function upd(k,v){ current.pages[curPage][curBtn][k]=v; renderButtons();
+  if(k==='fn'||k==='ha') renderEditor(); }
+function tog(k){ current.pages[curPage][curBtn][k]=!current.pages[curPage][curBtn][k];
+  renderButtons(); renderEditor(); }
+function sendBtn(){ const b=current.pages[curPage][curBtn];
+  pushLog(current.addr,'254.254','Modify_Channel_Type','ctrl',`page ${curPage+1} btn ${curBtn+1} → ${FN_TYPES[b.fn]}`);
+  toast(`Button ${curBtn+1} written to ${current.name}`); }
+function closeModal(){ document.getElementById('overlay').classList.remove('show'); }
+
+/* ---------------- console ---------------- */
+let paused=false, logCount=0;
+const SAMPLES=[
+  ['1.20','1.75','Single_Light_Control','ctrl','channel 3 → 80%'],
+  ['1.75','255.255','Read_Channel_Status_Response','stat','[0,100,80,0,0,0]'],
+  ['1.50','255.255','Sensor_Status_Broadcast','stat','motion=1 lux=340 temp=23.5C'],
+  ['1.20','1.100','Scene_Control','ctrl','area 1 scene 2'],
+  ['1.30','255.255','HVAC_Control_Response','stat','cool 20C fan auto power on'],
+  ['1.21','1.234','Audio_Play_Control','ctrl','source SD, play'],
+  ['1.100','255.255','Read_Channel_Status_Response','stat','[255,0,0,255,...]'],
+];
+function pad(n){ return String(n).padStart(2,'0'); }
+function stamp(){ const s=1+((logCount*7)%59); return `${pad(9)}:${pad(41)}:${pad(s)}.${pad((logCount*13)%99)}`; }
+function pushLog(src,dst,op,cls,data){
+  const el=document.getElementById('log');
+  const atBottom = el.scrollHeight-el.scrollTop-el.clientHeight < 40;
+  const div=document.createElement('div'); div.className='ln';
+  div.innerHTML=`<span class="ts">${stamp()}</span>  <span class="src">${src.padStart(7)} → ${dst.padEnd(7)}</span>  <span class="op ${cls}">${op}</span>  <span class="data">${data}</span>`;
+  el.appendChild(div); logCount++;
+  while(el.children.length>200) el.removeChild(el.firstChild);
+  if(atBottom) el.scrollTop=el.scrollHeight;
+  document.getElementById('logcount').textContent=`${logCount} frames`;
+}
+function tick(){ if(paused) return; const s=SAMPLES[Math.floor((logCount*2654435761)%SAMPLES.length)]; pushLog(...s); }
+function togglePause(){ paused=!paused;
+  document.getElementById('pausebtn').innerHTML= paused
+    ? '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>'
+    : '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/></svg>'; }
+function clearLog(){ document.getElementById('log').innerHTML=''; logCount=0;
+  document.getElementById('logcount').textContent='live'; }
+function toggleConsole(e){ if(e)e.stopPropagation();
+  document.getElementById('console').classList.toggle('open'); }
+function openConsole(){ document.getElementById('console').classList.add('open'); }
+
+/* ---------------- misc ---------------- */
+function scanBus(){ toast('Scanning bus (0x000E + 0xF003 broadcast)…');
+  pushLog('254.254','255.255','LAN_Scan_Device_Online','ctrl','broadcast probe'); }
+function adopt(){ document.getElementById('adopt').style.display='none';
+  toast('2 modules adopted — name them in their cards'); }
+let toastTimer;
+function toast(msg){ const t=document.getElementById('toast');
+  document.getElementById('toast-txt').textContent=msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('show'),2600); }
+function toggleTheme(){ const r=document.documentElement;
+  const cur=r.getAttribute('data-theme')|| (matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');
+  r.setAttribute('data-theme', cur==='dark'?'light':'dark'); }
+
+/* ---------------- init ---------------- */
+renderFilters(); renderDevices();
+// On phones the bottom console would cover content — start it collapsed.
+if (window.innerWidth <= 760) document.getElementById('console').classList.remove('open');
+for(let i=0;i<7;i++) tick();
+setInterval(tick, 1400);
+</script>
+</body></html>
