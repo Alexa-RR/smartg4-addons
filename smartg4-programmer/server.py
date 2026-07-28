@@ -190,8 +190,15 @@ async def api_backups(request: web.Request) -> web.Response:
     )
 
 
+def _known_device_type(app: web.Application, address: str) -> int | None:
+    for device in app["devices"]:
+        if device["address"] == address:
+            return int(device["device_type"], 16)
+    return None
+
+
 async def api_panel_buttons(request: web.Request) -> web.Response:
-    """Decode a DDP panel's buttons from its saved .sbd backup."""
+    """Decode a panel's buttons (SV-DDP or SB-6BS) from its .sbd backup."""
     target = request.query["target"]
     path = BACKUP_DIR / f"{target}.sbd"
     if not path.is_file():
@@ -201,7 +208,7 @@ async def api_panel_buttons(request: web.Request) -> web.Response:
         )
     try:
         backup = DeviceBackup.from_sbd(path.read_text(encoding="utf-8"))
-        panel = decode_panel(backup)
+        panel = decode_panel(backup, _known_device_type(request.app, target))
     except ValueError as err:
         return web.json_response({"ok": False, "error": str(err)}, status=422)
     panel["ok"] = True
@@ -241,7 +248,11 @@ async def api_panel_write(request: web.Request) -> web.Response:
     ]
     try:
         changed = apply_button(
-            backup, int(body["index"]), body.get("label"), commands
+            backup,
+            int(body["index"]),
+            body.get("label"),
+            commands,
+            _known_device_type(request.app, str(target)),
         )
     except ValueError as err:
         return web.json_response({"ok": False, "error": str(err)}, status=422)

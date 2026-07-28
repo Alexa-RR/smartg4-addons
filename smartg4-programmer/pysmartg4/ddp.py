@@ -30,17 +30,49 @@ from typing import Any
 from .backup import DeviceBackup
 from .crc import crc16_xmodem
 
-PANEL_NAME_OFFSET = 0
-LABELS_OFFSET = 15616
+PANEL_NAME_OFFSET = 0  # bank 1 on every panel type observed
 LABEL_LEN = 20
-BUTTON_COUNT = 16
-COMMANDS_OFFSET = 16896
 COMMAND_STRIDE = 990
 RECORD_LEN = 9
 
 FUNCTION_NAMES = {
     0x59: "single_channel",
 }
+
+
+@dataclass(frozen=True)
+class PanelLayout:
+    """Where a panel model keeps its button data (bank, offset)."""
+
+    buttons: int
+    labels_bank: int
+    labels_offset: int
+    commands_bank: int
+    commands_offset: int
+
+
+# Live-verified layouts, keyed by S-BUS device type. Both models share
+# the 20-char label fields, the 990-byte command slots and the 9-byte
+# CRC records — only counts and offsets differ.
+LAYOUTS: dict[int, PanelLayout] = {
+    # SV-DDP dynamic display panel
+    0x0095: PanelLayout(
+        buttons=16,
+        labels_bank=1, labels_offset=15616,
+        commands_bank=1, commands_offset=16896,
+    ),
+    # SB-6BS 6-button switch
+    0x0119: PanelLayout(
+        buttons=6,
+        labels_bank=0, labels_offset=200,
+        commands_bank=1, commands_offset=20,
+    ),
+}
+
+# Backwards-compatible aliases (DDP was implemented first).
+LABELS_OFFSET = LAYOUTS[0x0095].labels_offset
+BUTTON_COUNT = LAYOUTS[0x0095].buttons
+COMMANDS_OFFSET = LAYOUTS[0x0095].commands_offset
 
 
 @dataclass
@@ -117,41 +149,78 @@ def _text(image: bytes, offset: int, length: int) -> str:
     )
 
 
+def resolve_layout(
+    backup: DeviceBackup, device_type: int | None = None
+) -> tuple[int, PanelLayout]:
+    """Pick the layout for a backup — by device type, or by detection.
+
+    Detection checks that every label field is printable ASCII and the
+    command region is large enough; the first fitting layout wins.
+    """
+    if device_type is not None:
+        layout = LAYOUTS.get(device_type)
+        if layout is None:
+            raise ValueError(
+                f"no known button layout for device type 0x{device_type:04X}"
+            )
+        return device_type, layout
+    for dtype, layout in LAYOUTS.items():
+        labels_bank = backup.bank(layout.labels_bank)
+        commands_bank = backup.bank(layout.commands_bank)
+        span = layout.labels_offset + layout.buttons * LABEL_LEN
+        if len(labels_bank) < span:
+            continue
+        if len(commands_bank) < (
+            layout.commands_offset + layout.buttons * COMMAND_STRIDE
+        ):
+            continue
+        fields = labels_bank[layout.labels_offset : span]
+        if all(0x20 <= b < 0x7F or b in (0x00, 0xFF) for b in fields):
+            return dtype, layout
+    raise ValueError("backup matches no known panel layout")
+
+
 def apply_button(
     backup: DeviceBackup,
     index: int,
     label: str | None,
     commands: list[ButtonCommand],
+    device_type: int | None = None,
 ) -> list["FlashPage"]:
     """Apply a button edit to a backup image and return ONLY the flash
     pages whose bytes changed (what a restore must write). `index` is
     1-based; `label=None` keeps the existing label."""
     from .backup import FlashPage
 
-    if not 1 <= index <= BUTTON_COUNT:
+    _dtype, layout = resolve_layout(backup, device_type)
+    if not 1 <= index <= layout.buttons:
         raise ValueError(f"button index {index} out of range")
     if len(commands) * RECORD_LEN > COMMAND_STRIDE:
         raise ValueError(f"too many commands ({len(commands)})")
 
-    image = bytearray(backup.bank(1))
+    images = {
+        flag: bytearray(backup.bank(flag))
+        for flag in {layout.labels_bank, layout.commands_bank}
+    }
     if label is not None:
         encoded = label.encode("ascii", "replace")[:LABEL_LEN].ljust(
             LABEL_LEN, b" "
         )
-        offset = LABELS_OFFSET + (index - 1) * LABEL_LEN
-        image[offset : offset + LABEL_LEN] = encoded
+        offset = layout.labels_offset + (index - 1) * LABEL_LEN
+        images[layout.labels_bank][offset : offset + LABEL_LEN] = encoded
 
     slot = bytearray(COMMAND_STRIDE)  # zero padding terminates the list
     position = 0
     for command in commands:
         slot[position : position + RECORD_LEN] = command.encode()
         position += RECORD_LEN
-    offset = COMMANDS_OFFSET + (index - 1) * COMMAND_STRIDE
-    image[offset : offset + COMMAND_STRIDE] = slot
+    offset = layout.commands_offset + (index - 1) * COMMAND_STRIDE
+    images[layout.commands_bank][offset : offset + COMMAND_STRIDE] = slot
 
     changed: list[FlashPage] = []
     for page in backup.pages:
-        if page.flag != 1:
+        image = images.get(page.flag)
+        if image is None:
             continue
         new_data = bytes(image[page.address : page.address + len(page.data)])
         if new_data != page.data:
@@ -166,20 +235,27 @@ def apply_button(
     return changed
 
 
-def decode_panel(backup: DeviceBackup) -> dict[str, Any]:
-    """Decode a DDP backup into {name, buttons: [...]}."""
-    image = backup.bank(1)
-    needed = COMMANDS_OFFSET + BUTTON_COUNT * COMMAND_STRIDE
-    if len(image) < needed:
+def decode_panel(
+    backup: DeviceBackup, device_type: int | None = None
+) -> dict[str, Any]:
+    """Decode a panel backup into {name, model, buttons: [...]}."""
+    dtype, layout = resolve_layout(backup, device_type)
+    labels_bank = backup.bank(layout.labels_bank)
+    commands_bank = backup.bank(layout.commands_bank)
+    needed = layout.commands_offset + layout.buttons * COMMAND_STRIDE
+    if len(commands_bank) < needed:
         raise ValueError(
-            f"bank 1 too small for DDP layout ({len(image)} < {needed})"
+            f"bank {layout.commands_bank} too small for layout "
+            f"({len(commands_bank)} < {needed})"
         )
     buttons: list[PanelButton] = []
-    for n in range(BUTTON_COUNT):
-        label = _text(image, LABELS_OFFSET + n * LABEL_LEN, LABEL_LEN)
-        slot = image[
-            COMMANDS_OFFSET
-            + n * COMMAND_STRIDE : COMMANDS_OFFSET
+    for n in range(layout.buttons):
+        label = _text(
+            labels_bank, layout.labels_offset + n * LABEL_LEN, LABEL_LEN
+        )
+        slot = commands_bank[
+            layout.commands_offset
+            + n * COMMAND_STRIDE : layout.commands_offset
             + (n + 1) * COMMAND_STRIDE
         ]
         commands: list[ButtonCommand] = []
@@ -190,6 +266,7 @@ def decode_panel(backup: DeviceBackup) -> dict[str, Any]:
             commands.append(command)
         buttons.append(PanelButton(index=n + 1, label=label, commands=commands))
     return {
-        "name": _text(image, PANEL_NAME_OFFSET, LABEL_LEN),
+        "name": _text(backup.bank(1), PANEL_NAME_OFFSET, LABEL_LEN),
+        "device_type": f"0x{dtype:04X}",
         "buttons": [b.as_dict() for b in buttons],
     }
