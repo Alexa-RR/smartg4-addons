@@ -26,6 +26,18 @@ def clean(name: str) -> str:
     return name.encode("ascii", "replace")[:NAME_LEN].decode("ascii").rstrip()
 
 
+def decode_name(raw: bytes) -> str | None:
+    """Decode a stored name field, or None if it was never set.
+
+    Unset fields are 0xFF (or 0x00) padding; a field is only a name if
+    it is printable ASCII with something in it.
+    """
+    text = raw.split(b"\x00")[0].rstrip(b"\xff\x00 ")
+    if not text or any(b < 0x20 or b > 0x7E for b in text):
+        return None
+    return text.decode("ascii")
+
+
 async def read_channel_name(
     bus: SmartG4Bus, target: DeviceAddress, channel: int, retries: int = 3
 ) -> str | None:
@@ -40,7 +52,7 @@ async def read_channel_name(
         )
     except (TimeoutError, asyncio.TimeoutError):
         return None
-    return packet.payload[1:].decode("ascii", "replace").rstrip("\x00 ")
+    return decode_name(packet.payload[1:])
 
 
 async def read_channel_names(
@@ -70,7 +82,9 @@ async def write_channel_name(
     except (TimeoutError, asyncio.TimeoutError):
         pass  # some modules ack late or not at all — verify by reading
     await asyncio.sleep(0.3)
-    return await read_channel_name(bus, target, channel) == name
+    stored = await read_channel_name(bus, target, channel)
+    # Clearing a name reads back as "never set" (None), not "".
+    return stored == name or (not name and stored is None)
 
 
 async def write_device_name(
