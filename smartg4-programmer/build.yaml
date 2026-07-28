@@ -1,0 +1,6 @@
+# Base images for locally-built installs — the supervisor injects the
+# matching one as BUILD_FROM (required; there is no default).
+build_from:
+  aarch64: ghcr.io/home-assistant/aarch64-base:3.21
+  amd64: ghcr.io/home-assistant/amd64-base:3.21
+  armv7: ghcr.io/home-assistant/armv7-base:3.21
