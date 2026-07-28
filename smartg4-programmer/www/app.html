@@ -812,9 +812,18 @@ function connectWS(){
    against the decoded button table. */
 const PRESS = {};
 function notePress(f){
-  if(f.opcode !== '0x0031' || !f.data || f.data.channel === undefined) return;
   if(!DEVICES.some(d => d.addr === f.src && d.type === 'panel')) return;
   const entry = PRESS[f.src] || (PRESS[f.src] = {cmds: [], timer: null});
+
+  // 0x0286: the panel announces a press at the same instant as its
+  // command(s) — an exact delimiter, so react immediately.
+  if(f.opcode === '0x0286'){
+    flashCard(f.src);
+    clearTimeout(entry.timer);
+    entry.timer = setTimeout(() => resolvePress(f.src, entry.cmds.splice(0)), 700);
+    return;
+  }
+  if(f.opcode !== '0x0031' || !f.data || f.data.channel === undefined) return;
   entry.cmds.push({target: f.dst, channel: f.data.channel, level: f.data.level});
   clearTimeout(entry.timer);
   entry.timer = setTimeout(() => resolvePress(f.src, entry.cmds.splice(0)), 700);

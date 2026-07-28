@@ -322,6 +322,15 @@ COMMANDS: dict[int, dict[str, Any]] = {
         "name": "DeviceRestoreResponse",
         "parse": lambda p: {"raw": p.hex()},
     },
+    # --- Observed live, absent from the vendor SDK ------------------------
+    # 0x0286: an SB-6BS panel emits this to <subnet>.255 with an empty
+    # payload at the same instant as the button's own command, once per
+    # press. Treated as a "button pressed" marker; it carries no button
+    # number, so which button it was still comes from the command(s).
+    0x0286: {"name": "PanelButtonEvent"},
+    # 0xF036: relay modules broadcast this every few minutes, payload 0x00.
+    # Purpose unconfirmed — looks like a keepalive.
+    0xF036: {"name": "ModuleHeartbeat"},
     # --- Names (remarks) -------------------------------------------------
     # Zone/area remark. Live: 0xF00A ch1 -> "Basement"; a non-existent
     # zone answers with 0xF5 in the number field.
