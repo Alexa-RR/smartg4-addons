@@ -23,9 +23,20 @@ from pysmartg4.backup import (
     read_page,
     stage_page,
 )
-from pysmartg4.ddp import ButtonCommand, apply_button, decode_panel
+from pysmartg4.ddp import (
+    ButtonCommand,
+    apply_button,
+    decode_panel,
+    find_channel_names,
+)
 from pysmartg4.device_types import device_type_name
 from pysmartg4.discovery import discover, merge_device_lists
+from pysmartg4.naming import (
+    clean as clean_name,
+    read_channel_names,
+    write_channel_name,
+    write_device_name,
+)
 from pysmartg4.packet import BROADCAST, DeviceAddress, Packet
 
 APP_DIR = Path(__file__).parent
@@ -58,6 +69,20 @@ async def api_config(_request: web.Request) -> web.Response:
 
 def _inventory_path() -> Path:
     return BACKUP_DIR / "devices.json"
+
+
+def _channel_names_path() -> Path:
+    return BACKUP_DIR / "channel_names.json"
+
+
+def _save_channel_names(app: web.Application) -> None:
+    try:
+        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        _channel_names_path().write_text(
+            json.dumps(app["channel_names"], indent=2), encoding="utf-8"
+        )
+    except OSError:
+        pass
 
 
 def _save_inventory(app: web.Application) -> None:
@@ -100,34 +125,125 @@ async def api_devices(request: web.Request) -> web.Response:
 
 
 async def api_send(request: web.Request) -> web.Response:
-    """Generic command passthrough: {target, opcode, data|payload}."""
+    """Generic command passthrough: {target, opcode, data|payload, confirm}.
+
+    With confirm=true and a known response opcode, waits for the module's
+    acknowledgement and reports it.
+    """
     bus: SmartG4Bus = request.app["bus"]
     body = await request.json()
     target = DeviceAddress.parse(body["target"])
     opcode = int(body["opcode"])
+    data = body.get("data")
+    payload = bytes(body.get("payload", []))
     try:
-        if "data" in body:
-            bus.send(target, opcode, body["data"])
-        else:
-            bus.send(target, opcode, payload=bytes(body.get("payload", [])))
+        if body.get("confirm"):
+            try:
+                packet = await bus.request(
+                    target, opcode, data, payload, timeout=1.0, retries=2
+                )
+                return web.json_response(
+                    {"ok": True, "confirmed": True,
+                     "ack": f"0x{packet.opcode:04X}"}
+                )
+            except (TimeoutError, asyncio.TimeoutError):
+                return web.json_response({"ok": True, "confirmed": False})
+        bus.send(target, opcode, data, payload=payload)
         return web.json_response({"ok": True})
     except Exception as err:  # noqa: BLE001 - report to UI
         return web.json_response({"ok": False, "error": str(err)}, status=400)
 
 
+# Output-module channel counts by device type (live-confirmed).
+OUTPUT_CHANNELS = {0x01B8: 12, 0x07D3: 3}
+
+
+async def api_channels(request: web.Request) -> web.Response:
+    """Output modules + channel names — feeds the editor's dropdowns.
+
+    Names come from the modules themselves (0xF00E), cached in
+    /share/smartg4; `?refresh=1` re-reads them from the bus, and a saved
+    .sbd backup is used as a fallback for anything that stays silent.
+    """
+    app = request.app
+    bus: SmartG4Bus = app["bus"]
+    refresh = request.query.get("refresh") in ("1", "true", "yes")
+    cache = app["channel_names"]
+    result = []
+    for device in app["devices"]:
+        count = OUTPUT_CHANNELS.get(int(device["device_type"], 16))
+        if not count:
+            continue
+        address = device["address"]
+        names = cache.get(address)
+        if names is None or refresh:
+            live = await read_channel_names(
+                bus, DeviceAddress.parse(address), count
+            )
+            fallback: list[str] | None = None
+            if any(n is None for n in live):
+                path = BACKUP_DIR / f"{address}.sbd"
+                if path.is_file():
+                    try:
+                        fallback = find_channel_names(
+                            DeviceBackup.from_sbd(
+                                path.read_text(encoding="utf-8")
+                            ),
+                            count,
+                        )
+                    except (OSError, ValueError):
+                        fallback = None
+            names = [
+                live[i]
+                if live[i] is not None
+                else (fallback[i] if fallback else None)
+                for i in range(count)
+            ]
+            if any(names):
+                cache[address] = names
+                _save_channel_names(app)
+        result.append(
+            {
+                "address": address,
+                "name": device.get("remark") or f"Module {address}",
+                "channels": count,
+                "channel_names": names,
+            }
+        )
+    return web.json_response(result)
+
+
 async def api_rename(request: web.Request) -> web.Response:
-    """Write a device's remark (0x0010) and confirm via its 0x0011 ack."""
-    bus: SmartG4Bus = request.app["bus"]
+    """Rename a device (0x0010) or one of its channels (0xF010).
+
+    Body: {target, remark} for a device, or {target, channel, remark}
+    for a channel. Channel renames are verified by reading the name back.
+    """
+    app = request.app
+    bus: SmartG4Bus = app["bus"]
     body = await request.json()
     target = DeviceAddress.parse(body["target"])
-    remark = str(body["remark"])[:20]
-    try:
-        await bus.request(target, 0x0010, {"remark": remark})
-        return web.json_response({"ok": True})
-    except (TimeoutError, asyncio.TimeoutError):
+    remark = clean_name(str(body["remark"]))
+
+    if body.get("channel"):
+        channel = int(body["channel"])
+        ok = await write_channel_name(bus, target, channel, remark)
+        if not ok:
+            return web.json_response(
+                {"ok": False, "error": "channel name did not stick"},
+                status=504,
+            )
+        return web.json_response({"ok": True, "remark": remark})
+
+    if not await write_device_name(bus, target, remark):
         return web.json_response(
             {"ok": False, "error": "no acknowledgement from device"}, status=504
         )
+    for device in app["devices"]:
+        if device["address"] == str(target):
+            device["remark"] = remark
+    _save_inventory(app)
+    return web.json_response({"ok": True, "remark": remark})
 
 
 async def api_backup_start(request: web.Request) -> web.Response:
@@ -346,6 +462,13 @@ async def on_startup(app: web.Application) -> None:
             )
         except (OSError, ValueError):
             pass
+    if _channel_names_path().is_file():
+        try:
+            app["channel_names"].update(
+                json.loads(_channel_names_path().read_text(encoding="utf-8"))
+            )
+        except (OSError, ValueError):
+            pass
 
     def register_passive(packet: Packet, _parsed: dict | None) -> None:
         """Any module heard on the bus joins the inventory."""
@@ -380,6 +503,7 @@ def build_app() -> web.Application:
     app.router.add_get("/api/inventory", api_inventory)
     app.router.add_get("/api/devices", api_devices)
     app.router.add_post("/api/send", api_send)
+    app.router.add_get("/api/channels", api_channels)
     app.router.add_post("/api/rename", api_rename)
     app.router.add_post("/api/backup", api_backup_start)
     app.router.add_get("/api/backup/status", api_backup_status)
@@ -388,6 +512,7 @@ def build_app() -> web.Application:
     app.router.add_post("/api/panel/write", api_panel_write)
     app.router.add_get("/api/monitor", ws_monitor)
     app["devices"] = []
+    app["channel_names"] = {}
     app["backup_job"] = {
         "task": None, "target": None, "done": 0, "total": 0,
         "file": None, "error": None,

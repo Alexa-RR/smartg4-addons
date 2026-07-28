@@ -446,6 +446,7 @@ let DEVICES = [];          // decorated /api/devices results
 let CONFIG = null;         // /api/config
 const LIVE = {};           // "subnet.device" -> {channels:[{number,status}], seen}
 const BACKUPS = new Set(); // addresses with a saved .sbd
+let CHANNELS = [];         // /api/channels — output modules + channel names
 let activeFilter='all', current=null, curPage=0, curBtn=0, curCh=0;
 
 async function api(path){
@@ -640,14 +641,25 @@ function selBtn(i){ curBtn=i;
   renderEditor(); }
 function renderEditor(){
   const b=current.panel.buttons[curBtn];
-  const rows = b.commands.map((c,i)=>`
+  const rows = b.commands.map((c,i)=>{
+    const mod = CHANNELS.find(m=>m.address===c.target);
+    const targetOpts = CHANNELS.map(m=>
+      `<option value="${m.address}" ${m.address===c.target?'selected':''}>${m.name} · ${m.address}</option>`).join('')
+      + (mod ? '' : `<option value="${c.target}" selected>${c.target} (not on bus)</option>`);
+    const chanOpts = Array.from({length: mod?mod.channels:Math.max(12,c.p1)},(_,k)=>{
+      const n=k+1;
+      const nm = mod && mod.channel_names ? mod.channel_names[k] : null;
+      return `<option value="${n}" ${n===c.p1?'selected':''}>${n}${nm?` — ${nm}`:''}</option>`;
+    }).join('');
+    return `
     <div style="border:1px solid var(--divider);border-radius:8px;padding:9px;margin-bottom:9px">
-      <div class="row2" style="margin-bottom:8px">
-        <div class="field" style="margin:0"><label>Target</label>
-          <input type="text" value="${c.target}" onchange="updCmd(${i},'target',this.value)"></div>
-        <div class="field" style="margin:0"><label>Channel</label>
-          <input type="number" min="1" max="255" value="${c.p1}" onchange="updCmd(${i},'p1',+this.value)"></div>
-      </div>
+      <div class="field" style="margin:0 0 8px"><label>Module</label>
+        <select onchange="updCmd(${i},'target',this.value);updCmd(${i},'p1',1)">${targetOpts}</select></div>
+      <div class="field" style="margin:0 0 8px">
+        <label>Channel
+          <a href="#" style="float:right;font-weight:500;text-transform:none;letter-spacing:0;color:var(--primary);text-decoration:none"
+             onclick="event.preventDefault();renameChannel(${i})">rename…</a></label>
+        <select onchange="updCmd(${i},'p1',+this.value)">${chanOpts}</select></div>
       <div class="row2">
         <div class="field" style="margin:0"><label>Level %</label>
           <input type="number" min="0" max="100" value="${c.p2}" onchange="updCmd(${i},'p2',+this.value)"></div>
@@ -655,10 +667,13 @@ function renderEditor(){
           <input type="number" min="0" max="3600" value="${c.p3}" onchange="updCmd(${i},'p3',+this.value)"></div>
       </div>
       <div style="display:flex;gap:4px;margin-top:7px">
-        <button class="txt-btn" style="padding:4px 10px" onclick="testCmd(${i})">Test</button>
-        <button class="txt-btn muted" style="padding:4px 10px" onclick="delCmd(${i})">Remove</button>
+        <button class="txt-btn" style="padding:4px 10px" onclick="testCmd(${i},null)">Test</button>
+        <button class="txt-btn" style="padding:4px 10px" onclick="testCmd(${i},100)">On</button>
+        <button class="txt-btn" style="padding:4px 10px" onclick="testCmd(${i},0)">Off</button>
+        <button class="txt-btn muted" style="padding:4px 10px;margin-left:auto" onclick="delCmd(${i})">Remove</button>
       </div>
-    </div>`).join('') || '<div class="hint">No commands assigned to this button.</div>';
+    </div>`;
+  }).join('') || '<div class="hint">No commands assigned to this button.</div>';
   document.getElementById('editor').innerHTML=`
     <h3>Button ${b.index}</h3>
     <div class="field"><label>Label (max 20 chars)</label>
@@ -673,17 +688,44 @@ function renderEditor(){
       experimental — it stays disabled until <code>enable_flash_write</code> is turned on in
       the add-on options. “Test” sends a command on the bus right now, like a real press.</div>`;
 }
-function updCmd(i,k,v){ current.panel.buttons[curBtn].commands[i][k]=v; renderButtons(); }
+function updCmd(i,k,v){ current.panel.buttons[curBtn].commands[i][k]=v;
+  renderButtons(); if(k==='target') renderEditor(); }
+async function renameChannel(i){
+  const c = current.panel.buttons[curBtn].commands[i];
+  const mod = CHANNELS.find(m=>m.address===c.target);
+  const cur = mod && mod.channel_names ? (mod.channel_names[c.p1-1]||'') : '';
+  const name = prompt(`Name for ${c.target} channel ${c.p1} (max 20 chars) — written to the module:`, cur);
+  if(name===null) return;
+  try{
+    const r = await fetch('api/rename', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({target:c.target, channel:c.p1, remark:name})});
+    const j = await r.json();
+    if(!j.ok) throw new Error(j.error||'failed');
+    if(mod && mod.channel_names) mod.channel_names[c.p1-1] = j.remark;
+    toast(`Channel renamed to “${j.remark}” ✓ (verified on the module)`);
+    renderEditor();
+  }catch(e){ toast(`Rename failed: ${e.message}`); }
+}
 function delCmd(i){ current.panel.buttons[curBtn].commands.splice(i,1); renderButtons(); renderEditor(); }
 function addCmd(){ current.panel.buttons[curBtn].commands.push(
-  {function:'0x59', function_name:'single_channel', target:'1.1', p1:1, p2:100, p3:0});
+  {function:'0x59', function_name:'single_channel',
+   target: CHANNELS.length ? CHANNELS[0].address : '1.1', p1:1, p2:100, p3:0});
   renderButtons(); renderEditor(); }
-async function testCmd(i){
+async function testCmd(i, level){
   const c=current.panel.buttons[curBtn].commands[i];
   if(c.function!=='0x59'){ toast(`Function ${c.function_name} not sendable yet`); return; }
+  const lvl = level===null || level===undefined ? c.p2 : level;
   try{
-    await apiSend(c.target, 0x0031, {channel:c.p1, level:c.p2, time:c.p3});
-    toast(`Sent: ${c.target} ch ${c.p1} → ${c.p2}%`);
+    const r = await fetch('api/send', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({target:c.target, opcode:0x0031, confirm:true,
+        data:{channel:c.p1, level:lvl, time:c.p3}})});
+    const j = await r.json();
+    if(!j.ok) throw new Error(j.error||'failed');
+    const mod = CHANNELS.find(m=>m.address===c.target);
+    const nm = mod && mod.channel_names ? ` (${mod.channel_names[c.p1-1]})` : '';
+    toast(j.confirmed
+      ? `Confirmed by module ✓ — ${c.target} ch ${c.p1}${nm} → ${lvl}%`
+      : `Sent, no acknowledgement — ${c.target} ch ${c.p1}${nm} → ${lvl}%`);
   }catch(e){ toast(`Send failed: ${e.message}`); }
 }
 async function writeButton(){
@@ -771,6 +813,9 @@ function openConsole(){ document.getElementById('console').classList.add('open')
 
 /* ---------------- misc ---------------- */
 let scanning=false;
+async function loadChannels(){
+  try{ CHANNELS = await api('api/channels'); }catch{ CHANNELS = []; }
+}
 async function loadBackups(){
   try{
     const files = await api('api/backups');
@@ -796,6 +841,7 @@ async function scanBus(){
   try{
     const found = await api('api/devices?duration=30');
     DEVICES = found.map(decorate);
+    await loadChannels();
     renderFilters(); renderDevices(); updateAdopt();
     toast(`Scan complete — ${DEVICES.length} device(s) in inventory`);
   }catch(err){
@@ -909,5 +955,6 @@ if (window.innerWidth <= 760) document.getElementById('console').classList.remov
 loadConfig();
 connectWS();
 // Show the persisted inventory immediately; scanning stays on the button.
-loadBackups().then(loadInventory).then(()=>{ if(!DEVICES.length) scanBus(); });
+loadBackups().then(loadInventory).then(loadChannels)
+  .then(()=>{ if(!DEVICES.length) scanBus(); });
 </script>

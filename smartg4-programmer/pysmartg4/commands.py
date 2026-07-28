@@ -279,6 +279,14 @@ COMMANDS: dict[int, dict[str, Any]] = {
             "total_pages": int.from_bytes(p[1:3], "big"),
         },
     },
+    0xDC12: {
+        "name": "WriteFlashPage",
+        "response": 0xDC13,
+    },
+    0xDC13: {
+        "name": "WriteFlashPageResponse",
+        "parse": lambda p: {"raw": p.hex()},
+    },
     0xDC14: {
         "name": "ReadFlashPage",
         "encode": lambda d: int(d["package"]).to_bytes(2, "big"),
@@ -304,6 +312,48 @@ COMMANDS: dict[int, dict[str, Any]] = {
         "name": "DeviceRestoreResponse",
         "parse": lambda p: {"raw": p.hex()},
     },
+    # --- Names (remarks) -------------------------------------------------
+    # Zone/area remark. Live: 0xF00A ch1 -> "Basement"; a non-existent
+    # zone answers with 0xF5 in the number field.
+    0xF00A: {
+        "name": "ReadZoneRemark",
+        "encode": lambda d: bytes([d["zone"]]),
+        "response": 0xF00B,
+    },
+    0xF00B: {
+        "name": "ReadZoneRemarkResponse",
+        "parse": lambda p: {
+            "zone": p[0],
+            "remark": p[1:].decode("ascii", "replace").rstrip("\x00 "),
+        },
+    },
+    0xF00C: {
+        "name": "WriteZoneRemark",
+        "encode": lambda d: bytes([d["zone"]])
+        + d["remark"].encode("ascii", "replace")[:20].ljust(20, b" "),
+        "response": 0xF00D,
+    },
+    0xF00D: {"name": "WriteZoneRemarkResponse"},
+    # Channel remark — the per-circuit names ("Drape U", "AC Mamad").
+    0xF00E: {
+        "name": "ReadChannelRemark",
+        "encode": lambda d: bytes([d["channel"]]),
+        "response": 0xF00F,
+    },
+    0xF00F: {
+        "name": "ReadChannelRemarkResponse",
+        "parse": lambda p: {
+            "channel": p[0],
+            "remark": p[1:].decode("ascii", "replace").rstrip("\x00 "),
+        },
+    },
+    0xF010: {
+        "name": "WriteChannelRemark",
+        "encode": lambda d: bytes([d["channel"]])
+        + d["remark"].encode("ascii", "replace")[:20].ljust(20, b" "),
+        "response": 0xF011,
+    },
+    0xF011: {"name": "WriteChannelRemarkResponse"},
     # 0xF003 Read MAC address — answers 0xF004 with MAC + remark (name).
     0xF003: {"name": "ReadMACAddress", "response": 0xF004},
     0xF004: {

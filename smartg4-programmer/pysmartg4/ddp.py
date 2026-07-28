@@ -239,6 +239,32 @@ def apply_button(
     return changed
 
 
+def find_channel_names(
+    backup: DeviceBackup, count: int, bank: int = 0
+) -> list[str] | None:
+    """Locate a module's channel-name table: `count` consecutive 20-byte
+    printable ASCII fields in a bank (observed at bank 0 @405 on a
+    12-channel relay). Returns the names, or None if no table is found.
+    Searches beyond offset 100 to skip the device/zone remark fields."""
+    image = backup.bank(bank)
+
+    def field_ok(chunk: bytes) -> bool:
+        return (
+            len(chunk) == LABEL_LEN
+            and all(0x20 <= b < 0x7F for b in chunk)
+            and bool(chunk.strip())
+        )
+
+    for start in range(100, len(image) - count * LABEL_LEN + 1):
+        fields = [
+            image[start + i * LABEL_LEN : start + (i + 1) * LABEL_LEN]
+            for i in range(count)
+        ]
+        if all(field_ok(f) for f in fields):
+            return [f.decode("ascii").rstrip() for f in fields]
+    return None
+
+
 def decode_panel(
     backup: DeviceBackup, device_type: int | None = None
 ) -> dict[str, Any]:
