@@ -141,11 +141,19 @@ class PanelButton:
 
 
 def _text(image: bytes, offset: int, length: int) -> str:
+    """Decode a stored label — ASCII or Hebrew (CP1255); '' if unset."""
+    from .naming import decode_name
+
+    return decode_name(image[offset : offset + length]) or ""
+
+
+def _is_label_byte(b: int) -> bool:
+    """Bytes a stored label may contain: printable ASCII, CP1255 Hebrew,
+    or the 0x00/0xFF padding of an unset field."""
     return (
-        image[offset : offset + length]
-        .decode("ascii", "replace")
-        .rstrip("\x00\xff ")
-        .strip()
+        0x20 <= b <= 0x7E  # ASCII
+        or 0xC0 <= b <= 0xFA  # CP1255 Hebrew letters + punctuation
+        or b in (0x00, 0xFF)
     )
 
 
@@ -175,7 +183,7 @@ def resolve_layout(
         ):
             continue
         fields = labels_bank[layout.labels_offset : span]
-        if all(0x20 <= b < 0x7F or b in (0x00, 0xFF) for b in fields):
+        if all(_is_label_byte(b) for b in fields):
             return dtype, layout
     raise ValueError("backup matches no known panel layout")
 
@@ -251,7 +259,7 @@ def find_channel_names(
     def field_ok(chunk: bytes) -> bool:
         return (
             len(chunk) == LABEL_LEN
-            and all(0x20 <= b < 0x7F for b in chunk)
+            and all(0x20 <= b <= 0x7E or 0xC0 <= b <= 0xFA for b in chunk)
             and bool(chunk.strip())
         )
 
@@ -261,7 +269,9 @@ def find_channel_names(
             for i in range(count)
         ]
         if all(field_ok(f) for f in fields):
-            return [f.decode("ascii").rstrip() for f in fields]
+            from .naming import decode_name
+
+            return [decode_name(f) or "" for f in fields]
     return None
 
 

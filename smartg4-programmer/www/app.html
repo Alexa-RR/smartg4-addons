@@ -704,10 +704,12 @@ function renderEditor(){
     <button class="btn btn-primary" onclick="writeButton()" style="margin-top:14px">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4 20-7z"/></svg>
       Write to panel</button>
-    <div class="ha-note" style="margin-top:12px">Writes are verified: changed flash pages are
-      staged (0xDC15), committed (0xDC16), then read back and compared. The commit is still
-      experimental — it stays disabled until <code>enable_flash_write</code> is turned on in
-      the add-on options. “Test” sends a command on the bus right now, like a real press.</div>`;
+    <div class="ha-note" style="margin-top:12px"><b>Button writing does not work yet.</b>
+      The panel acknowledges the restore command but the flash page never changes, so
+      “Write to panel” leaves it untouched — the write opcode is still being reverse
+      engineered. Everything else here is live: <b>Test</b> fires a command on the bus,
+      <b>rename</b> writes real names to the modules, and pressing a wall button
+      highlights it here.</div>`;
 }
 function updCmd(i,k,v){ current.panel.buttons[curBtn].commands[i][k]=v;
   renderButtons(); if(k==='target') renderEditor(); }
@@ -768,7 +770,7 @@ async function writeButton(){
     const res = await post({...body, confirm:true});
     if(!res.ok) throw new Error(res.error||'failed');
     toast(res.verified ? `Button ${b.index} written and verified ✓`
-        : `Write sent but verification FAILED — check the panel and restore from backup if needed`);
+        : (res.error || 'Write could not be verified'));
   }catch(e){ toast(`Write failed: ${e.message}`); }
 }
 function closeModal(){ document.getElementById('overlay').classList.remove('show'); }

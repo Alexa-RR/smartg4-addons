@@ -403,14 +403,30 @@ async def api_panel_write(request: web.Request) -> web.Response:
         )
     result["written"] = True
     verified = True
+    unchanged = 0
     for page in changed:
         try:
             reread = await read_page(bus, target, page.number)
             if reread.data != page.data:
                 verified = False
+                original = next(
+                    (p for p in backup.pages if p.number == page.number), None
+                )
+                if original is not None and reread.data == original.data:
+                    unchanged += 1
         except (TimeoutError, asyncio.TimeoutError):
             verified = False
     result["verified"] = verified
+    if not verified:
+        # Known state of play: the device acks the 0xDC16 restore but the
+        # page never lands, so flash is left exactly as it was.
+        result["unchanged_pages"] = unchanged
+        result["error"] = (
+            "Flash writing is not supported yet: the panel acknowledged the "
+            "restore but the page did not change"
+            + (" — the panel is untouched." if unchanged == len(changed)
+               else ". Verify the panel against its backup.")
+        )
     if verified:
         # Keep the on-disk backup in sync with what the panel now holds.
         by_number = {p.number: p for p in changed}
