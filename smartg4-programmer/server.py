@@ -483,7 +483,8 @@ async def api_panel_write(request: web.Request) -> web.Response:
     add-on option, stages the changed pages (0xDC15), commits (0xDC16),
     then re-reads every written page to verify.
     """
-    bus: SmartG4Bus = request.app["bus"]
+    app = request.app
+    bus: SmartG4Bus = app["bus"]
     body = await request.json()
     target = DeviceAddress.parse(body["target"])
     path = BACKUP_DIR / f"{target}.sbd"

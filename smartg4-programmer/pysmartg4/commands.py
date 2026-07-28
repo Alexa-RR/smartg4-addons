@@ -322,6 +322,16 @@ COMMANDS: dict[int, dict[str, Any]] = {
         "name": "DeviceRestoreResponse",
         "parse": lambda p: {"raw": p.hex()},
     },
+    # Curtain/shutter configuration (SDK: Read/Write_Curtain_Control_Enabled).
+    # Response: [enabled_bitmask, running_time per group...] — see curtains.py
+    0xDC23: {"name": "ReadCurtainConfig", "response": 0xDC24},
+    0xDC24: {
+        "name": "ReadCurtainConfigResponse",
+        "parse": lambda p: {
+            "enabled_mask": p[0] if p else 0,
+            "running_times": list(p[1:]),
+        },
+    },
     # --- Observed live, absent from the vendor SDK ------------------------
     # 0x0286: an SB-6BS panel emits this to <subnet>.255 with an empty
     # payload at the same instant as the button's own command, once per
