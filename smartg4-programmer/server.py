@@ -70,6 +70,20 @@ def _save_inventory(app: web.Application) -> None:
         pass  # persistence is best-effort
 
 
+def _update_inventory(app: web.Application, found: list[dict]) -> int:
+    """Merge into the inventory IN PLACE (the app mapping is frozen after
+    startup) and persist. Returns the number of new devices."""
+    merged, new = merge_device_lists(app["devices"], found)
+    app["devices"][:] = merged
+    _save_inventory(app)
+    return new
+
+
+async def api_inventory(request: web.Request) -> web.Response:
+    """The accumulated inventory, instantly — no scan."""
+    return web.json_response(request.app["devices"])
+
+
 async def api_devices(request: web.Request) -> web.Response:
     """Scan and return the ACCUMULATED inventory, not just this scan.
 
@@ -79,14 +93,10 @@ async def api_devices(request: web.Request) -> web.Response:
     """
     app = request.app
     bus: SmartG4Bus = app["bus"]
-    duration = float(request.query.get("duration", 45.0))
+    duration = float(request.query.get("duration", 30.0))
     found = await discover(bus, duration=min(duration, 120.0))
-    merged, _new = merge_device_lists(
-        app["devices"], [d.as_dict() for d in found]
-    )
-    app["devices"] = merged
-    _save_inventory(app)
-    return web.json_response(merged)
+    _update_inventory(app, [d.as_dict() for d in found])
+    return web.json_response(app["devices"])
 
 
 async def api_send(request: web.Request) -> web.Response:
@@ -318,10 +328,9 @@ async def on_startup(app: web.Application) -> None:
     await bus.connect()
     app["bus"] = bus
 
-    app["devices"] = []
     if _inventory_path().is_file():
         try:
-            app["devices"] = json.loads(
+            app["devices"][:] = json.loads(
                 _inventory_path().read_text(encoding="utf-8")
             )
         except (OSError, ValueError):
@@ -342,7 +351,7 @@ async def on_startup(app: web.Application) -> None:
             "opcodes_seen": [f"0x{packet.opcode:04X}"],
         }
         merged, new = merge_device_lists(app["devices"], [entry])
-        app["devices"] = merged
+        app["devices"][:] = merged
         if new:
             _save_inventory(app)
 
@@ -357,6 +366,7 @@ def build_app() -> web.Application:
     app = web.Application()
     app.router.add_get("/", index)
     app.router.add_get("/api/config", api_config)
+    app.router.add_get("/api/inventory", api_inventory)
     app.router.add_get("/api/devices", api_devices)
     app.router.add_post("/api/send", api_send)
     app.router.add_post("/api/rename", api_rename)
@@ -366,6 +376,7 @@ def build_app() -> web.Application:
     app.router.add_get("/api/panel/buttons", api_panel_buttons)
     app.router.add_post("/api/panel/write", api_panel_write)
     app.router.add_get("/api/monitor", ws_monitor)
+    app["devices"] = []
     app["backup_job"] = {
         "task": None, "target": None, "done": 0, "total": 0,
         "file": None, "error": None,

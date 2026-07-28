@@ -774,19 +774,29 @@ function openConsole(){ document.getElementById('console').classList.add('open')
 
 /* ---------------- misc ---------------- */
 let scanning=false;
+async function loadInventory(){
+  // Instant: the server's persisted, accumulated inventory — no scan.
+  try{
+    const found = await api('api/inventory');
+    if(found.length){
+      DEVICES = found.map(decorate);
+      renderFilters(); renderDevices(); updateAdopt();
+    }
+  }catch{ /* first run — inventory empty until a scan */ }
+}
 async function scanBus(){
   if(scanning) return;
   scanning=true;
-  toast('Scanning bus (0x000E + 0xF003 bursts, ~45 s — replies are lossy)…');
+  toast('Scanning bus (~30 s) — results add to the inventory, never remove…');
   document.getElementById('devcount').innerHTML='<b>…</b> scanning';
   try{
-    const found = await api('api/devices');
+    const found = await api('api/devices?duration=30');
     DEVICES = found.map(decorate);
     renderFilters(); renderDevices(); updateAdopt();
-    toast(`Scan complete — ${DEVICES.length} device(s) found`);
+    toast(`Scan complete — ${DEVICES.length} device(s) in inventory`);
   }catch(err){
     toast(`Scan failed: ${err.message}`);
-    document.getElementById('devcount').innerHTML=`<b>${DEVICES.length}</b> devices`;
+    loadInventory();  // the scan may still have accumulated server-side
   }
   scanning=false;
 }
@@ -894,5 +904,6 @@ renderFilters(); renderDevices();
 if (window.innerWidth <= 760) document.getElementById('console').classList.remove('open');
 loadConfig();
 connectWS();
-scanBus();
+// Show the persisted inventory immediately; scanning stays on the button.
+loadInventory().then(()=>{ if(!DEVICES.length) scanBus(); });
 </script>
