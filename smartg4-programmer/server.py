@@ -39,6 +39,13 @@ from pysmartg4.naming import (
     write_device_name,
 )
 from pysmartg4.packet import BROADCAST, DeviceAddress, Packet
+from pysmartg4.vendor_frame import (
+    READ_RESP,
+    WRITE_RESP,
+    TemplateStore,
+    button_record,
+    parse_button_payload,
+)
 
 APP_DIR = Path(__file__).parent
 GATEWAY = os.environ.get("SMARTG4_GATEWAY", "255.255.255.255")
@@ -362,6 +369,92 @@ def _known_device_type(app: web.Application, address: str) -> int | None:
     return None
 
 
+def _templates_path() -> Path:
+    return BACKUP_DIR / "vendor_templates.json"
+
+
+async def _vendor_exchange(
+    app: web.Application, frame: bytes, response_op: str, button: int,
+    timeout: float = 2.0,
+) -> dict | None:
+    """Send a forged vendor frame and wait for its reply."""
+    loop = asyncio.get_running_loop()
+    future: asyncio.Future = loop.create_future()
+
+    def on_raw(data: bytes, _addr) -> None:
+        if future.done() or len(data) < 27 or data[14:16] != b"\x45\x63":
+            return
+        if data[21:23].hex() != response_op:
+            return
+        payload = data[25:-2]
+        if payload and payload[0] == button:
+            future.set_result(parse_button_payload(payload))
+
+    unsubscribe = app["bus"].on_raw(on_raw)
+    try:
+        app["bus"].send_raw(frame)
+        return await asyncio.wait_for(future, timeout)
+    except (TimeoutError, asyncio.TimeoutError):
+        return None
+    finally:
+        unsubscribe()
+
+
+async def _vendor_addresses_panel(
+    app: web.Application, address: str, decoded: dict
+) -> tuple[bool, str]:
+    """Confirm the learned template talks to THIS panel.
+
+    A template carries its target inside the obfuscated header, so the
+    only safe check is empirical: read buttons back and compare them with
+    the panel's own decoded configuration. Refusing on a mismatch is what
+    stops a write landing on the wrong panel.
+    """
+    store: TemplateStore = app["vendor"]
+    if not store.can_read:
+        return False, "no vendor read template learned yet"
+    matched = compared = 0
+    for button in decoded["buttons"]:
+        if not button["commands"]:
+            continue
+        live = await _vendor_exchange(
+            app,
+            store.read_frame(button["index"], 1, app["local_ip"]),
+            READ_RESP,
+            button["index"],
+        )
+        if live is None:
+            continue
+        compared += 1
+        first = button["commands"][0]
+        if (
+            live.get("target") == first["target"]
+            and live.get("p1") == first["p1"]
+        ):
+            matched += 1
+        if compared >= 4:
+            break
+    if compared == 0:
+        return False, "the panel did not answer vendor-protocol reads"
+    if matched < compared:
+        return False, (
+            f"the learned template addresses a different panel "
+            f"({matched}/{compared} buttons matched {address})"
+        )
+    return True, f"verified against {matched} button(s)"
+
+
+async def api_vendor_status(request: web.Request) -> web.Response:
+    store: TemplateStore = request.app["vendor"]
+    return web.json_response(
+        {
+            "can_read": store.can_read,
+            "can_write": store.can_write,
+            "operations": sorted(store.templates),
+        }
+    )
+
+
 async def api_panel_buttons(request: web.Request) -> web.Response:
     """Decode a panel's buttons (SV-DDP or SB-6BS) from its .sbd backup."""
     target = request.query["target"]
@@ -433,6 +526,67 @@ async def api_panel_write(request: web.Request) -> web.Response:
         "written": False,
         "verified": False,
     }
+
+    # Preferred path: the vendor's own button-write operation, learned by
+    # watching Smart Cloud. Only used once the template is proven to
+    # address THIS panel.
+    store: TemplateStore = app["vendor"]
+    if store.can_write:
+        decoded = decode_panel(backup, _known_device_type(app, str(target)))
+        addressed, why = await _vendor_addresses_panel(app, str(target), decoded)
+        result["vendor"] = {"available": True, "addresses_panel": addressed,
+                            "detail": why}
+        if not body.get("confirm"):
+            return web.json_response(result)
+        if not addressed:
+            _LOGGER.warning("write: %s vendor template rejected — %s", target, why)
+            return web.json_response(
+                {"ok": False, "error": f"Refusing to write: {why}."}, status=409
+            )
+        index = int(body["index"])
+        first = commands[0] if commands else None
+        record = button_record(
+            first.function if first else 0,
+            first.subnet if first else 0,
+            first.device if first else 0,
+            first.p1 if first else 0,
+            first.p2 if first else 0,
+            first.p3 if first else 0,
+        )
+        ack = await _vendor_exchange(
+            app,
+            store.write_frame(index, 1, record, app["local_ip"]),
+            WRITE_RESP,
+            index,
+        )
+        await asyncio.sleep(0.4)
+        after = await _vendor_exchange(
+            app, store.read_frame(index, 1, app["local_ip"]), READ_RESP, index
+        )
+        ok = bool(
+            after
+            and first
+            and after.get("target") == f"{first.subnet}.{first.device}"
+            and after.get("p1") == first.p1
+            and after.get("p2") == first.p2
+        )
+        _LOGGER.info(
+            "write: %s button %d via vendor protocol — ack=%s verified=%s",
+            target, index, bool(ack), ok,
+        )
+        result.update(written=True, verified=ok, method="vendor")
+        if not ok:
+            result["error"] = (
+                "The panel acknowledged but the button did not change — "
+                "re-read the panel and try again."
+            )
+        if len(commands) > 1:
+            result["note"] = (
+                f"only the first of {len(commands)} commands was written — "
+                "multi-command buttons are not supported over this path yet"
+            )
+        return web.json_response(result)
+
     if not changed or not body.get("confirm"):
         return web.json_response(result)
     if not FLASH_WRITE_ENABLED:
@@ -580,6 +734,32 @@ async def on_startup(app: web.Application) -> None:
 
     bus.on_packet(register_passive)
 
+    app["local_ip"] = bus._local_ip  # noqa: SLF001 - needed for forged frames
+    store: TemplateStore = app["vendor"]
+    if _templates_path().is_file():
+        try:
+            store.load(json.loads(_templates_path().read_text(encoding="utf-8")))
+            _LOGGER.info(
+                "vendor templates loaded: %s", sorted(store.templates) or "none"
+            )
+        except (OSError, ValueError):
+            pass
+
+    def learn_vendor(data: bytes, _addr) -> None:
+        """Learn the vendor's button-programming frames off the wire."""
+        op = store.learn(data)
+        if op:
+            _LOGGER.info("vendor template learned: opcode %s", op)
+            try:
+                BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+                _templates_path().write_text(
+                    json.dumps(store.as_dict(), indent=2), encoding="utf-8"
+                )
+            except OSError:
+                pass
+
+    bus.on_raw(learn_vendor)
+
 
 async def on_cleanup(app: web.Application) -> None:
     app["bus"].close()
@@ -599,9 +779,12 @@ def build_app() -> web.Application:
     app.router.add_get("/api/backups", api_backups)
     app.router.add_get("/api/panel/buttons", api_panel_buttons)
     app.router.add_post("/api/panel/write", api_panel_write)
+    app.router.add_get("/api/vendor/status", api_vendor_status)
     app.router.add_get("/api/monitor", ws_monitor)
     app["devices"] = []
     app["channel_names"] = {}
+    app["vendor"] = TemplateStore()
+    app["local_ip"] = b"\x00\x00\x00\x00"
     app["backup_job"] = {
         "task": None, "target": None, "done": 0, "total": 0,
         "file": None, "error": None,

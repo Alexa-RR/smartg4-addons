@@ -60,6 +60,7 @@ class SmartG4Bus(asyncio.DatagramProtocol):
 
         self._transport: asyncio.DatagramTransport | None = None
         self._callbacks: list[PacketCallback] = []
+        self._raw_callbacks: list[Callable[[bytes, tuple[str, int]], None]] = []
         self._waiters: list[
             tuple[Callable[[Packet], bool], asyncio.Future[Packet]]
         ] = []
@@ -101,6 +102,14 @@ class SmartG4Bus(asyncio.DatagramProtocol):
         self._transport = transport  # type: ignore[assignment]
 
     def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
+        # Raw listeners see everything, including frames that are not the
+        # documented format — the vendor's button programming uses one
+        # (see vendor_frame.py).
+        for raw_callback in self._raw_callbacks:
+            try:
+                raw_callback(data, addr)
+            except Exception:  # noqa: BLE001 - never kill the loop
+                _LOGGER.exception("error in raw packet callback")
         try:
             packet = Packet.decode(data)
         except ValueError as err:
@@ -123,6 +132,19 @@ class SmartG4Bus(asyncio.DatagramProtocol):
         """Subscribe to all decoded packets. Returns an unsubscribe function."""
         self._callbacks.append(callback)
         return lambda: self._callbacks.remove(callback)
+
+    def on_raw(
+        self, callback: Callable[[bytes, tuple[str, int]], None]
+    ) -> Callable[[], None]:
+        """Subscribe to every datagram, decodable or not."""
+        self._raw_callbacks.append(callback)
+        return lambda: self._raw_callbacks.remove(callback)
+
+    def send_raw(self, frame: bytes) -> None:
+        """Send a pre-built datagram (e.g. a forged vendor frame)."""
+        if not self._transport:
+            raise RuntimeError("bus is not connected; call connect() first")
+        self._transport.sendto(frame, (self.gateway, self.port))
 
     # -- sending ------------------------------------------------------------
 

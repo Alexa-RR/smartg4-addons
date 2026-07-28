@@ -466,6 +466,7 @@ let CONFIG = null;         // /api/config
 const LIVE = {};           // "subnet.device" -> {channels:[{number,status}], seen}
 const BACKUPS = new Set(); // addresses with a saved .sbd
 let CHANNELS = [];         // /api/channels — output modules + channel names
+let VENDOR = {can_read:false, can_write:false};  // /api/vendor/status
 let activeFilter='all', current=null, curPage=0, curBtn=0, curCh=0;
 
 async function api(path){
@@ -704,12 +705,16 @@ function renderEditor(){
     <button class="btn btn-primary" onclick="writeButton()" style="margin-top:14px">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4 20-7z"/></svg>
       Write to panel</button>
-    <div class="ha-note" style="margin-top:12px"><b>Button writing does not work yet.</b>
-      The panel acknowledges the restore command but the flash page never changes, so
-      “Write to panel” leaves it untouched — the write opcode is still being reverse
-      engineered. Everything else here is live: <b>Test</b> fires a command on the bus,
-      <b>rename</b> writes real names to the modules, and pressing a wall button
-      highlights it here.</div>`;
+    ${VENDOR.can_write
+      ? `<div class="ha-note" style="margin-top:12px"><b>Writing is available.</b>
+           Changes go out using the panel's own programming protocol, and the button is
+           read back to confirm. The panel is verified before every write, so a template
+           learned from a different panel is refused rather than misapplied.</div>`
+      : `<div class="ha-note" style="margin-top:12px"><b>Writing is not available yet.</b>
+           This add-on learns the panel-programming operation by watching it happen once:
+           with the add-on running, program a single button in the vendor software. From
+           then on, writing works here for that panel. Everything else is live already —
+           <b>Test</b>, <b>rename</b>, and press-to-highlight.</div>`}`;
 }
 function updCmd(i,k,v){ current.panel.buttons[curBtn].commands[i][k]=v;
   renderButtons(); if(k==='target') renderEditor(); }
@@ -763,14 +768,25 @@ async function writeButton(){
   try{
     const dry = await post(body);                       // dry run first
     if(!dry.ok) throw new Error(dry.error||'failed');
-    if(!dry.changed_pages.length){ toast('No changes to write'); return; }
-    if(!confirm(`Write button ${b.index} to ${current.addr}?\n`
-      + `${dry.changed_pages.length} flash page(s) will be rewritten: ${dry.changed_pages.join(', ')}.\n`
-      + `A verified backup exists and pages are read back after writing.`)) return;
+    const vendor = dry.vendor && dry.vendor.available;
+    if(!vendor && !dry.changed_pages.length){ toast('No changes to write'); return; }
+    if(vendor && !dry.vendor.addresses_panel){
+      toast(`Cannot write: ${dry.vendor.detail}`); return;
+    }
+    const what = vendor
+      ? `Write button ${b.index} of ${current.addr} using the panel's own programming protocol?\n`
+        + `Verified against this panel: ${dry.vendor.detail}.\n`
+        + `The button is read back afterwards to confirm.`
+      : `Write button ${b.index} to ${current.addr}?\n`
+        + `${dry.changed_pages.length} flash page(s) would be rewritten.`;
+    if(!confirm(what)) return;
     const res = await post({...body, confirm:true});
     if(!res.ok) throw new Error(res.error||'failed');
-    toast(res.verified ? `Button ${b.index} written and verified ✓`
-        : (res.error || 'Write could not be verified'));
+    if(res.verified){
+      toast(`Button ${b.index} written and verified ✓${res.note ? ' — ' + res.note : ''}`);
+    }else{
+      toast(res.error || 'Write could not be verified');
+    }
   }catch(e){ toast(`Write failed: ${e.message}`); }
 }
 function closeModal(){ document.getElementById('overlay').classList.remove('show'); }
@@ -914,6 +930,9 @@ let scanning=false;
 async function loadChannels(){
   try{ CHANNELS = await api('api/channels'); }catch{ CHANNELS = []; }
 }
+async function loadVendor(){
+  try{ VENDOR = await api('api/vendor/status'); }catch{ /* keep defaults */ }
+}
 async function loadBackups(){
   try{
     const files = await api('api/backups');
@@ -1053,6 +1072,6 @@ if (window.innerWidth <= 760) document.getElementById('console').classList.remov
 loadConfig();
 connectWS();
 // Show the persisted inventory immediately; scanning stays on the button.
-loadBackups().then(loadInventory).then(loadChannels)
+loadBackups().then(loadInventory).then(loadChannels).then(loadVendor)
   .then(()=>{ if(!DEVICES.length) scanBus(); });
 </script>
