@@ -21,6 +21,18 @@ def _status_byte(value: int) -> bool | None:
     return {0xF8: True, 0xF5: False}.get(value)
 
 
+def _encode_name(name: str) -> bytes:
+    from .naming import encode_name
+
+    return encode_name(name)
+
+
+def _decode_name(raw: bytes) -> str | None:
+    from .naming import decode_name
+
+    return decode_name(raw)
+
+
 def _channel_bitmask(data: bytes, count: int) -> list[dict[str, Any]]:
     channels: list[dict[str, Any]] = []
     for i, byte in enumerate(data):
@@ -259,14 +271,12 @@ COMMANDS: dict[int, dict[str, Any]] = {
     # in the frame header.
     0x000F: {
         "name": "ScanDeviceOnlineResponse",
-        "parse": lambda p: {
-            "remark": p.decode("ascii", "replace").rstrip("\x00 ")
-        },
+        "parse": lambda p: {"remark": _decode_name(p) or ""},
     },
-    # 0x0010 Write device remark (name): 20 bytes, space-padded ASCII.
+    # 0x0010 Write device remark (name): 20 bytes, space-padded.
     0x0010: {
         "name": "WriteDeviceRemark",
-        "encode": lambda d: d["remark"].encode("ascii")[:20].ljust(20, b" "),
+        "encode": lambda d: _encode_name(d["remark"]),
         "response": 0x0011,
     },
     0x0011: {"name": "WriteDeviceRemarkResponse"},
@@ -324,13 +334,12 @@ COMMANDS: dict[int, dict[str, Any]] = {
         "name": "ReadZoneRemarkResponse",
         "parse": lambda p: {
             "zone": p[0],
-            "remark": p[1:].decode("ascii", "replace").rstrip("\x00 "),
+            "remark": _decode_name(p[1:]),
         },
     },
     0xF00C: {
         "name": "WriteZoneRemark",
-        "encode": lambda d: bytes([d["zone"]])
-        + d["remark"].encode("ascii", "replace")[:20].ljust(20, b" "),
+        "encode": lambda d: bytes([d["zone"]]) + _encode_name(d["remark"]),
         "response": 0xF00D,
     },
     0xF00D: {"name": "WriteZoneRemarkResponse"},
@@ -344,13 +353,12 @@ COMMANDS: dict[int, dict[str, Any]] = {
         "name": "ReadChannelRemarkResponse",
         "parse": lambda p: {
             "channel": p[0],
-            "remark": p[1:].decode("ascii", "replace").rstrip("\x00 "),
+            "remark": _decode_name(p[1:]),
         },
     },
     0xF010: {
         "name": "WriteChannelRemark",
-        "encode": lambda d: bytes([d["channel"]])
-        + d["remark"].encode("ascii", "replace")[:20].ljust(20, b" "),
+        "encode": lambda d: bytes([d["channel"]]) + _encode_name(d["remark"]),
         "response": 0xF011,
     },
     0xF011: {"name": "WriteChannelRemarkResponse"},
@@ -360,7 +368,7 @@ COMMANDS: dict[int, dict[str, Any]] = {
         "name": "ReadMACAddressResponse",
         "parse": lambda p: {
             "mac": ":".join(f"{b:02x}" for b in p[0:8]),
-            "remark": p[8:].split(b"\x00")[0].decode("ascii", "replace"),
+            "remark": _decode_name(p[8:]) or "",
         },
     },
 }

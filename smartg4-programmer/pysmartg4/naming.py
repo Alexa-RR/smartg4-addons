@@ -20,22 +20,40 @@ from .packet import DeviceAddress
 
 NAME_LEN = 20
 
+# Smart-G4 stores names as 20 raw bytes. Latin text is plain ASCII;
+# Hebrew installations use CP1255 (Windows Hebrew), whose 0x20-0x7E range
+# is identical to ASCII, so one codec round-trips both.
+ENCODING = "cp1255"
+
+
+def encode_name(name: str) -> bytes:
+    """Encode a name to the 20-byte, space-padded on-device form."""
+    raw = name.encode(ENCODING, "replace")[:NAME_LEN]
+    return raw.ljust(NAME_LEN, b" ")
+
 
 def clean(name: str) -> str:
-    """Coerce a name to what the hardware can store."""
-    return name.encode("ascii", "replace")[:NAME_LEN].decode("ascii").rstrip()
+    """Coerce a name to exactly what the hardware will store."""
+    return encode_name(name).decode(ENCODING).rstrip()
 
 
 def decode_name(raw: bytes) -> str | None:
     """Decode a stored name field, or None if it was never set.
 
-    Unset fields are 0xFF (or 0x00) padding; a field is only a name if
-    it is printable ASCII with something in it.
+    Unset fields are 0xFF / 0x00 padding. A field counts as a name only
+    if every byte is printable in CP1255 — which covers ASCII and
+    Hebrew, and rejects the binary junk left in unused flash.
     """
     text = raw.split(b"\x00")[0].rstrip(b"\xff\x00 ")
-    if not text or any(b < 0x20 or b > 0x7E for b in text):
+    if not text:
         return None
-    return text.decode("ascii")
+    # printable ASCII, or CP1255 Hebrew/punctuation — never control bytes
+    if any(b < 0x20 or b == 0x7F or 0x80 <= b <= 0xBF or b >= 0xFB for b in text):
+        return None
+    try:
+        return text.decode(ENCODING)
+    except UnicodeDecodeError:
+        return None
 
 
 async def read_channel_name(
