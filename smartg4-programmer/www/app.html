@@ -216,6 +216,25 @@
   .pbtn .led { width: 9px; height: 9px; border-radius: 50%; background: var(--divider-strong); flex: none; }
   .pbtn .led.on { background: var(--primary); box-shadow: 0 0 6px var(--primary); }
 
+  /* physical press feedback */
+  .pbtn.pressed { border-color: var(--green); animation: press-flash 1.4s ease-out; }
+  @keyframes press-flash {
+    0%   { background: color-mix(in srgb, var(--green) 40%, var(--card-bg));
+           box-shadow: 0 0 0 5px color-mix(in srgb, var(--green) 30%, transparent); }
+    100% { background: var(--app-bg); box-shadow: none; }
+  }
+  .card.pressed { animation: card-flash 1.4s ease-out; }
+  @keyframes card-flash {
+    0%   { border-color: var(--green);
+           box-shadow: 0 0 0 4px color-mix(in srgb, var(--green) 28%, transparent); }
+    100% { border-color: var(--divider); box-shadow: var(--shadow-1); }
+  }
+  .press-hint { display: flex; align-items: center; gap: 8px; font-size: 12px;
+    color: var(--text-2); padding: 8px 10px; margin-bottom: 12px; border-radius: 8px;
+    background: color-mix(in srgb, var(--green) 10%, transparent);
+    border: 1px dashed color-mix(in srgb, var(--green) 35%, transparent); }
+  .press-hint .live { background: var(--green); }
+
   /* editor pane */
   .editor { width: 340px; border-left: 1px solid var(--divider); padding: 18px 20px; overflow: auto;
     background: var(--app-bg); flex: none; }
@@ -500,7 +519,7 @@ function renderDevices(){
   document.getElementById('grid').innerHTML = list.map(d=>{
     const backed = BACKUPS.has(d.addr);
     const detail = d.raw.device_type==='0x0095' ? '16 buttons' : '6 buttons';
-    return `<div class="card">
+    return `<div class="card" data-addr="${d.addr}">
       <div class="card-top">
         <div class="dev-icon ic-panel">${ICON.panel}</div>
         <div class="dev-head">
@@ -675,6 +694,8 @@ function renderEditor(){
     </div>`;
   }).join('') || '<div class="hint">No commands assigned to this button.</div>';
   document.getElementById('editor').innerHTML=`
+    <div class="press-hint"><span class="live"></span>
+      Press this button on the wall — it lights up here.</div>
     <h3>Button ${b.index}</h3>
     <div class="field"><label>Label (max 20 chars)</label>
       <input type="text" maxlength="20" value="${b.label||''}" onchange="current.panel.buttons[curBtn].label=this.value;renderButtons()"></div>
@@ -780,7 +801,73 @@ function connectWS(){
       const known = DEVICES.some(d=>d.addr===f.src);
       if(known) scheduleRender();
     }
+    notePress(f);
   };
+
+/* ---------------- physical button presses ---------------- */
+/* A panel broadcasts its button's command(s) when pressed. Commands from
+   one press arrive back-to-back, so collect a short burst and match it
+   against the decoded button table. */
+const PRESS = {};
+function notePress(f){
+  if(f.opcode !== '0x0031' || !f.data || f.data.channel === undefined) return;
+  if(!DEVICES.some(d => d.addr === f.src && d.type === 'panel')) return;
+  const entry = PRESS[f.src] || (PRESS[f.src] = {cmds: [], timer: null});
+  entry.cmds.push({target: f.dst, channel: f.data.channel, level: f.data.level});
+  clearTimeout(entry.timer);
+  entry.timer = setTimeout(() => resolvePress(f.src, entry.cmds.splice(0)), 700);
+}
+function flashCard(addr){
+  const card = document.querySelector(`.card[data-addr="${addr}"]`);
+  if(!card) return;
+  card.classList.remove('pressed');
+  void card.offsetWidth;              // restart the animation
+  card.classList.add('pressed');
+  setTimeout(()=>card.classList.remove('pressed'), 1500);
+}
+function resolvePress(addr, cmds){
+  if(!cmds.length) return;
+  flashCard(addr);
+  const dev = DEVICES.find(d => d.addr === addr);
+  const label = dev ? dev.name : addr;
+  const open = current && current.addr === addr && current.panel;
+  if(!open){
+    toast(`Press on ${label} → ${cmds.map(c=>`${c.target} ch${c.channel}`).join(', ')}`);
+    return;
+  }
+  // score each button by how many of its commands the burst contains
+  const scored = current.panel.buttons.map((b, i) => {
+    if(!b.commands.length) return {i, score: 0};
+    const hits = b.commands.filter(c =>
+      cmds.some(x => x.target === c.target && x.channel === c.p1)).length;
+    return {i, score: hits ? hits - Math.abs(b.commands.length - cmds.length) * 0.1 : 0};
+  }).filter(s => s.score > 0);
+  if(!scored.length){
+    toast(`Press on ${label} → ${cmds.map(c=>`${c.target} ch${c.channel}`).join(', ')} (no matching button)`);
+    return;
+  }
+  const top = Math.max(...scored.map(s => s.score));
+  // Buttons can share identical commands — highlight every tied match
+  // rather than guessing which one was physically pressed.
+  const matches = scored.filter(s => s.score === top).map(s => s.i);
+  curBtn = matches[0];
+  renderButtons(); renderEditor();
+  const els = document.querySelectorAll('.pbtn');
+  matches.forEach((idx, n) => {
+    const el = els[idx];
+    if(!el) return;
+    el.classList.add('pressed');
+    if(n === 0) el.scrollIntoView({block:'nearest'});
+    setTimeout(()=>el.classList.remove('pressed'), 1500);
+  });
+  const names = matches.map(i => {
+    const b = current.panel.buttons[i];
+    return `${b.index} (${b.label || 'unnamed'})`;
+  });
+  toast(matches.length === 1
+    ? `Button ${names[0]} pressed`
+    : `Pressed — matches buttons ${names.join(' / ')}: identical assignments`);
+}
   ws.onclose = () => { pushLog('—','—','monitor_disconnected','stat','retrying in 3 s'); setTimeout(connectWS, 3000); };
   ws.onerror = () => ws.close();
 }
