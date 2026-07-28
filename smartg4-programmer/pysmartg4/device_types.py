@@ -8,16 +8,16 @@ Sources: wb-mqtt-smartbus, community protocol documentation.
 """
 
 DEVICE_TYPES: dict[int, str] = {
-    0x0095: "DDP panel (dynamic display panel)",
+    0x0095: "SV-DDP panel (dynamic display panel)",
     # Observed live on this bus (1.55/1.108/1.109): answers 0x000E scan,
     # broadcasts 3-channel 0xEFFF scene status, ignores 0x0033 and 0xF003.
     0x07D3: "3-channel relay/dimmer module",
     # Observed live: answers 0x0033 with 12 channel levels; names like
     # "F1 O/F2" (on/off).
     0x01B8: "12-channel relay module",
-    # Observed live: one per room ("F1 Bathroom", "B Movie Room", ...);
-    # answers 0x000E but no channel/temperature reads. Model unconfirmed.
-    0x0119: "Room module (unidentified, likely wall panel)",
+    # One per room ("F1 Bathroom", "B Movie Room", ...); answers 0x000E
+    # but no channel/temperature reads. Identified by the owner.
+    0x0119: "SB-6BS 6-button switch panel",
     # Confirmed by the owner: the installation's central controller.
     0x0456: "Central controller",
     0x139C: "Zone Beast (relay/dimmer/HVAC combo)",

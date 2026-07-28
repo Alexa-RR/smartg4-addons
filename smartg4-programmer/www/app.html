@@ -464,9 +464,8 @@ async function apiSend(target, opcode, data){
    are identified on the bus; unknown types render as generic modules. */
 function uiType(d){
   const t = parseInt(d.device_type, 16);
-  if(t === 0x0095) return 'panel';
+  if(t === 0x0095 || t === 0x0119) return 'panel';  // SV-DDP, SB-6BS
   if(t === 0x07D3 || t === 0x01B8 || t === 0x139C) return 'relay';
-  if(t === 0x0119) return 'sensor';   // room modules, model unconfirmed
   return 'sensor';
 }
 function mkButtons(){ return Array.from({length:6},()=>({
@@ -533,6 +532,23 @@ function renderDevices(){
 async function editDevice(id){
   const d=DEVICES.find(x=>x.id===id); current=d;
   if(d.type!=='panel'){ openChannelControl(d); return; }
+  if(parseInt(d.raw.device_type,16)!==0x0095){
+    document.getElementById('m-name').textContent=d.name;
+    document.getElementById('m-sub').textContent=`${d.addr} · ${d.raw.type_name}`;
+    document.getElementById('pgtabs').innerHTML='';
+    document.getElementById('editor').innerHTML='';
+    document.getElementById('overlay').classList.add('show');
+    document.getElementById('btngrid').innerHTML=`
+      <div style="grid-column:1/-1;color:var(--text-2);padding:20px">
+        <p style="margin:0 0 10px"><b>${d.raw.type_name}</b> — button decoding not mapped yet.</p>
+        <p style="margin:0 0 10px">The flash layout is only decoded for SV-DDP panels so far.
+        You can already back this switch up (⋮ menu), and its button presses appear in the
+        bus monitor and as <code>smartg4_command</code> events in Home Assistant.</p>
+        <p style="margin:0">Press its physical buttons with the monitor open — the commands it
+        sends are the raw material for mapping its layout next.</p>
+      </div>`;
+    return;
+  }
   curBtn=0;
   document.getElementById('m-name').textContent=d.name;
   document.getElementById('m-sub').textContent=`${d.addr} · ${d.raw.type_name}`;

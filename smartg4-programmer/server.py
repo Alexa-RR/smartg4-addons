@@ -24,7 +24,8 @@ from pysmartg4.backup import (
     stage_page,
 )
 from pysmartg4.ddp import ButtonCommand, apply_button, decode_panel
-from pysmartg4.discovery import discover
+from pysmartg4.device_types import device_type_name
+from pysmartg4.discovery import discover, merge_device_lists
 from pysmartg4.packet import BROADCAST, DeviceAddress, Packet
 
 APP_DIR = Path(__file__).parent
@@ -55,13 +56,37 @@ async def api_config(_request: web.Request) -> web.Response:
     )
 
 
+def _inventory_path() -> Path:
+    return BACKUP_DIR / "devices.json"
+
+
+def _save_inventory(app: web.Application) -> None:
+    try:
+        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        _inventory_path().write_text(
+            json.dumps(app["devices"], indent=2), encoding="utf-8"
+        )
+    except OSError:
+        pass  # persistence is best-effort
+
+
 async def api_devices(request: web.Request) -> web.Response:
-    bus: SmartG4Bus = request.app["bus"]
-    # Broadcast scan replies are lossy (RS-485 collisions) — a full
-    # inventory of a large bus needs a long accumulating scan.
+    """Scan and return the ACCUMULATED inventory, not just this scan.
+
+    Broadcast scan replies are lossy (RS-485 collisions), so any single
+    scan misses modules; the inventory merges every scan and all passive
+    traffic, and persists across restarts.
+    """
+    app = request.app
+    bus: SmartG4Bus = app["bus"]
     duration = float(request.query.get("duration", 45.0))
     found = await discover(bus, duration=min(duration, 120.0))
-    return web.json_response([d.as_dict() for d in found])
+    merged, _new = merge_device_lists(
+        app["devices"], [d.as_dict() for d in found]
+    )
+    app["devices"] = merged
+    _save_inventory(app)
+    return web.json_response(merged)
 
 
 async def api_send(request: web.Request) -> web.Response:
@@ -292,6 +317,36 @@ async def on_startup(app: web.Application) -> None:
     )
     await bus.connect()
     app["bus"] = bus
+
+    app["devices"] = []
+    if _inventory_path().is_file():
+        try:
+            app["devices"] = json.loads(
+                _inventory_path().read_text(encoding="utf-8")
+            )
+        except (OSError, ValueError):
+            pass
+
+    def register_passive(packet: Packet, _parsed: dict | None) -> None:
+        """Any module heard on the bus joins the inventory."""
+        if packet.source_type == 0xFFFE or packet.source == bus.sender:
+            return
+        entry = {
+            "address": str(packet.source),
+            "subnet": packet.source.subnet,
+            "device": packet.source.device,
+            "device_type": f"0x{packet.source_type:04X}",
+            "type_name": device_type_name(packet.source_type),
+            "mac": None,
+            "remark": None,
+            "opcodes_seen": [f"0x{packet.opcode:04X}"],
+        }
+        merged, new = merge_device_lists(app["devices"], [entry])
+        app["devices"] = merged
+        if new:
+            _save_inventory(app)
+
+    bus.on_packet(register_passive)
 
 
 async def on_cleanup(app: web.Application) -> None:
