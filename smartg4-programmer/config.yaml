@@ -1,5 +1,5 @@
 name: Smart-G4 Builder
-version: "0.3.1"
+version: "0.3.2"
 slug: smartg4_programmer
 description: Program and monitor your Smart-G4 (S-BUS) devices from Home Assistant
 url: https://github.com/Alexa-RR/smartg4-addons

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 from pathlib import Path
 
@@ -50,6 +51,13 @@ FLASH_WRITE_ENABLED = os.environ.get(
     "SMARTG4_ENABLE_FLASH_WRITE", "false"
 ).lower() in ("1", "true", "yes")
 PORT = 8099
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+    datefmt="%H:%M:%S",
+)
+_LOGGER = logging.getLogger("smartg4")
 
 SKELETON = """<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -119,8 +127,13 @@ async def api_devices(request: web.Request) -> web.Response:
     app = request.app
     bus: SmartG4Bus = app["bus"]
     duration = float(request.query.get("duration", 30.0))
+    _LOGGER.info("scan: starting (%.0fs)", duration)
     found = await discover(bus, duration=min(duration, 120.0))
-    _update_inventory(app, [d.as_dict() for d in found])
+    new = _update_inventory(app, [d.as_dict() for d in found])
+    _LOGGER.info(
+        "scan: %d answered, %d new, inventory now %d",
+        len(found), new, len(app["devices"]),
+    )
     return web.json_response(app["devices"])
 
 
@@ -228,6 +241,10 @@ async def api_rename(request: web.Request) -> web.Response:
     if body.get("channel"):
         channel = int(body["channel"])
         ok = await write_channel_name(bus, target, channel, remark)
+        _LOGGER.info(
+            "rename: %s ch%d -> %r %s",
+            target, channel, remark, "OK" if ok else "FAILED",
+        )
         if not ok:
             return web.json_response(
                 {"ok": False, "error": "channel name did not stick"},
@@ -236,6 +253,7 @@ async def api_rename(request: web.Request) -> web.Response:
         return web.json_response({"ok": True, "remark": remark})
 
     if not await write_device_name(bus, target, remark):
+        _LOGGER.warning("rename: %s -> %r no ack", target, remark)
         return web.json_response(
             {"ok": False, "error": "no acknowledgement from device"}, status=504
         )
@@ -243,6 +261,7 @@ async def api_rename(request: web.Request) -> web.Response:
         if device["address"] == str(target):
             device["remark"] = remark
     _save_inventory(app)
+    _LOGGER.info("rename: %s -> %r OK", target, remark)
     return web.json_response({"ok": True, "remark": remark})
 
 
@@ -266,6 +285,7 @@ async def api_backup_start(request: web.Request) -> web.Response:
             status=504,
         )
     job.update(target=str(target), done=0, total=total, error=None, file=None)
+    _LOGGER.info("backup: %s starting (%d pages)", target, total)
 
     async def run() -> None:
         def progress(done: int, _total: int) -> None:
@@ -277,8 +297,10 @@ async def api_backup_start(request: web.Request) -> web.Response:
             path = BACKUP_DIR / f"{target}.sbd"
             path.write_text(backup.to_sbd(), encoding="utf-8")
             job["file"] = path.name
+            _LOGGER.info("backup: %s written to %s", target, path)
         except Exception as err:  # noqa: BLE001 - reported via status endpoint
             job["error"] = str(err)
+            _LOGGER.exception("backup: %s failed", target)
 
     job["task"] = asyncio.create_task(run())
     return web.json_response({"ok": True, "total": total})
@@ -373,6 +395,11 @@ async def api_panel_write(request: web.Request) -> web.Response:
     except ValueError as err:
         return web.json_response({"ok": False, "error": str(err)}, status=422)
 
+    _LOGGER.info(
+        "write: %s button %s -> %d command(s), %d page(s) change%s",
+        target, body["index"], len(commands), len(changed),
+        "" if body.get("confirm") else " (dry run)",
+    )
     result = {
         "ok": True,
         "changed_pages": [p.number for p in changed],
@@ -392,11 +419,13 @@ async def api_panel_write(request: web.Request) -> web.Response:
             status=403,
         )
     for page in changed:
+        _LOGGER.info("write: staging page %d (0xDC15)", page.number)
         stage_page(bus, target, page)
         await asyncio.sleep(0.1)
     try:
         await commit_restore(bus, target, len(changed))
     except (TimeoutError, asyncio.TimeoutError):
+        _LOGGER.warning("write: %s no 0xDC17 restore ack", target)
         return web.json_response(
             {"ok": False, "error": "no 0xDC17 restore acknowledgement"},
             status=504,
@@ -421,6 +450,10 @@ async def api_panel_write(request: web.Request) -> web.Response:
         # Known state of play: the device acks the 0xDC16 restore but the
         # page never lands, so flash is left exactly as it was.
         result["unchanged_pages"] = unchanged
+        _LOGGER.warning(
+            "write: %s NOT applied — %d/%d pages unchanged after commit",
+            target, unchanged, len(changed),
+        )
         result["error"] = (
             "Flash writing is not supported yet: the panel acknowledged the "
             "restore but the page did not change"
@@ -432,6 +465,7 @@ async def api_panel_write(request: web.Request) -> web.Response:
         by_number = {p.number: p for p in changed}
         backup.pages = [by_number.get(p.number, p) for p in backup.pages]
         path.write_text(backup.to_sbd(), encoding="utf-8")
+        _LOGGER.info("write: %s verified and backup updated", target)
     return web.json_response(result)
 
 
