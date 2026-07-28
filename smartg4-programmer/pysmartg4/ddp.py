@@ -209,13 +209,17 @@ def apply_button(
         offset = layout.labels_offset + (index - 1) * LABEL_LEN
         images[layout.labels_bank][offset : offset + LABEL_LEN] = encoded
 
-    slot = bytearray(COMMAND_STRIDE)  # zero padding terminates the list
-    position = 0
+    # Overwrite only what must change: the new records plus one zero
+    # "terminator" record (decode stops there). Original slot padding is
+    # preserved so a small edit touches as few flash pages as possible.
+    offset = layout.commands_offset + (index - 1) * COMMAND_STRIDE
+    slot = images[layout.commands_bank]
+    position = offset
     for command in commands:
         slot[position : position + RECORD_LEN] = command.encode()
         position += RECORD_LEN
-    offset = layout.commands_offset + (index - 1) * COMMAND_STRIDE
-    images[layout.commands_bank][offset : offset + COMMAND_STRIDE] = slot
+    if position + RECORD_LEN <= offset + COMMAND_STRIDE:
+        slot[position : position + RECORD_LEN] = bytes(RECORD_LEN)
 
     changed: list[FlashPage] = []
     for page in backup.pages:
