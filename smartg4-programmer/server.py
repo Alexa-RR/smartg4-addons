@@ -83,6 +83,28 @@ def _channel_names_path() -> Path:
     return BACKUP_DIR / "channel_names.json"
 
 
+def _sane_name(name: object) -> bool:
+    """Reject anything that isn't a real name — including mojibake cached
+    by older versions that decoded raw flash as ASCII."""
+    return (
+        isinstance(name, str)
+        and bool(name.strip())
+        and "�" not in name
+        and all(c.isprintable() for c in name)
+    )
+
+
+def _sanitize_channel_cache(cache: dict) -> dict:
+    clean: dict[str, list] = {}
+    for address, names in cache.items():
+        if not isinstance(names, list):
+            continue
+        scrubbed = [n if _sane_name(n) else None for n in names]
+        if any(scrubbed):  # all-empty: drop so it gets re-read
+            clean[address] = scrubbed
+    return clean
+
+
 def _save_channel_names(app: web.Application) -> None:
     try:
         BACKUP_DIR.mkdir(parents=True, exist_ok=True)
@@ -212,9 +234,14 @@ async def api_channels(request: web.Request) -> web.Response:
                 else (fallback[i] if fallback else None)
                 for i in range(count)
             ]
+            names = [n if _sane_name(n) else None for n in names]
+            # Always replace the cached entry — a module that answers with
+            # nothing must clear stale values, not keep serving them.
             if any(names):
                 cache[address] = names
-                _save_channel_names(app)
+            else:
+                cache.pop(address, None)
+            _save_channel_names(app)
         result.append(
             {
                 "address": address,
@@ -514,9 +541,21 @@ async def on_startup(app: web.Application) -> None:
             pass
     if _channel_names_path().is_file():
         try:
-            app["channel_names"].update(
-                json.loads(_channel_names_path().read_text(encoding="utf-8"))
+            raw = json.loads(_channel_names_path().read_text(encoding="utf-8"))
+            cleaned = _sanitize_channel_cache(raw)
+            app["channel_names"].update(cleaned)
+            dropped = sum(
+                1
+                for a, names in raw.items()
+                for i, n in enumerate(names if isinstance(names, list) else [])
+                if n and not _sane_name(n)
             )
+            if dropped:
+                _LOGGER.info(
+                    "channel names: dropped %d unreadable cached name(s)",
+                    dropped,
+                )
+                _save_channel_names(app)
         except (OSError, ValueError):
             pass
 
