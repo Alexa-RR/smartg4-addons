@@ -46,6 +46,14 @@ from pysmartg4.vendor_frame import (
     button_record,
     parse_button_payload,
 )
+from pysmartg4.vendor_program import (
+    READ_RESPONSE,
+    WRITE_RESPONSE,
+    ButtonFunction,
+    build_read_frame,
+    build_write_frame,
+    parse_response,
+)
 
 APP_DIR = Path(__file__).parent
 GATEWAY = os.environ.get("SMARTG4_GATEWAY", "255.255.255.255")
@@ -400,6 +408,112 @@ async def _vendor_exchange(
         unsubscribe()
 
 
+async def _program_exchange(
+    app: web.Application,
+    frame: bytes,
+    want_opcode: int,
+    button: int,
+    timeout: float = 2.0,
+    retries: int = 3,
+) -> dict | None:
+    """Send a capture-free vendor programming frame and await its reply.
+
+    Mirrors Smart Cloud: up to `retries` attempts with a short timeout, since
+    these frames collide with the panel's periodic broadcasts.
+    """
+    bus: SmartG4Bus = app["bus"]
+    for _ in range(retries):
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future = loop.create_future()
+
+        def on_raw(data: bytes, _addr) -> None:
+            if future.done():
+                return
+            parsed = parse_response(data)
+            if (
+                parsed
+                and parsed.get("opcode") == want_opcode
+                and parsed.get("button") == button
+            ):
+                future.set_result(parsed)
+
+        unsubscribe = bus.on_raw(on_raw)
+        try:
+            bus.send_raw(frame)
+            return await asyncio.wait_for(future, timeout)
+        except (TimeoutError, asyncio.TimeoutError):
+            continue
+        finally:
+            unsubscribe()
+    return None
+
+
+def _program_source(app: web.Application) -> dict:
+    """Source identity for capture-free frames, taken from the live bus."""
+    bus: SmartG4Bus = app["bus"]
+    return {
+        "source": bus.sender,
+        "source_type": bus.sender_type,
+        "source_ip": app["local_ip"],
+    }
+
+
+async def _program_read(
+    app: web.Application, panel: DeviceAddress, button: int, page: int
+) -> dict | None:
+    frame = build_read_frame(button, page, panel, **_program_source(app))
+    return await _program_exchange(app, frame, READ_RESPONSE, button)
+
+
+async def _program_write_button(
+    app: web.Application,
+    panel: DeviceAddress,
+    button: int,
+    commands: list["ButtonCommand"],
+) -> dict:
+    """Write every function entry of one key, capture-free, verifying each.
+
+    Each command becomes one (button, page) entry via opcode 0xE002; the entry
+    is read back (0xE000/0xE001) and compared. Returns a per-page report.
+    """
+    src = _program_source(app)
+    pages = []
+    for page, cmd in enumerate(commands):
+        fn = ButtonFunction(
+            button=button,
+            page=page,
+            function=cmd.function,
+            target=DeviceAddress(cmd.subnet, cmd.device),
+            p1=cmd.p1,
+            p2=cmd.p2,
+            p3=cmd.p3,
+        )
+        ack = await _program_exchange(
+            app, build_write_frame(fn, panel, **src), WRITE_RESPONSE, button
+        )
+        await asyncio.sleep(0.4)
+        back = await _program_read(app, panel, button, page)
+        verified = bool(
+            back
+            and back.get("target") == f"{cmd.subnet}.{cmd.device}"
+            and back.get("p1") == cmd.p1
+            and back.get("p2") == cmd.p2
+        )
+        pages.append(
+            {"page": page, "acked": bool(ack), "verified": verified}
+        )
+        _LOGGER.info(
+            "write: %s button %d page %d via capture-free protocol — "
+            "ack=%s verified=%s",
+            panel, button, page, bool(ack), verified,
+        )
+    return {
+        "written": bool(pages),
+        "verified": all(p["verified"] for p in pages) and bool(pages),
+        "pages": pages,
+    }
+
+
 async def _vendor_addresses_panel(
     app: web.Application, address: str, decoded: dict
 ) -> tuple[bool, str]:
@@ -448,11 +562,36 @@ async def api_vendor_status(request: web.Request) -> web.Response:
     store: TemplateStore = request.app["vendor"]
     return web.json_response(
         {
-            "can_read": store.can_read,
-            "can_write": store.can_write,
+            # Programming no longer needs a captured template: the header
+            # cipher is known, so frames are built from scratch for any panel.
+            "capture_free": True,
+            "can_read": True,
+            "can_write": True,
+            "template_can_read": store.can_read,
+            "template_can_write": store.can_write,
             "operations": sorted(store.templates),
         }
     )
+
+
+async def api_program_read(request: web.Request) -> web.Response:
+    """Read one key's current function config straight from the panel.
+
+    Query: target=<subnet.device>, button=<n>, page=<n, default 0>.
+    Capture-free — no backup or template required.
+    """
+    app = request.app
+    panel = DeviceAddress.parse(request.query["target"])
+    button = int(request.query["button"])
+    page = int(request.query.get("page", "0"))
+    result = await _program_read(app, panel, button, page)
+    if result is None:
+        return web.json_response(
+            {"ok": False, "error": "the panel did not answer (offline, "
+             "password-protected, or unsupported firmware)"},
+            status=504,
+        )
+    return web.json_response({"ok": True, **result})
 
 
 async def api_panel_buttons(request: web.Request) -> web.Response:
@@ -528,9 +667,33 @@ async def api_panel_write(request: web.Request) -> web.Response:
         "verified": False,
     }
 
-    # Preferred path: the vendor's own button-write operation, learned by
-    # watching Smart Cloud. Only used once the template is proven to
-    # address THIS panel.
+    # Preferred path: the vendor's own button-write operation, built from
+    # scratch (no capture needed) now that the header cipher is known
+    # (pysmartg4.vendor_program). Verifies by reading each entry back.
+    if commands:
+        if not body.get("confirm"):
+            result["method"] = "capture-free"
+            result["vendor"] = {"available": True, "capture_free": True}
+            return web.json_response(result)
+        report = await _program_write_button(
+            app, target, int(body["index"]), commands
+        )
+        result.update(
+            method="capture-free",
+            written=report["written"],
+            verified=report["verified"],
+            pages=report["pages"],
+        )
+        if not report["verified"]:
+            result["error"] = (
+                "The panel did not confirm the change — it may be offline, "
+                "protected by a programming password, or on a firmware whose "
+                "button opcode differs. Re-read the panel and try again."
+            )
+        return web.json_response(result)
+
+    # Fallback: a captured vendor template, if one was learned by watching
+    # Smart Cloud. Only used once proven to address THIS panel.
     store: TemplateStore = app["vendor"]
     if store.can_write:
         decoded = decode_panel(backup, _known_device_type(app, str(target)))
@@ -781,6 +944,7 @@ def build_app() -> web.Application:
     app.router.add_get("/api/panel/buttons", api_panel_buttons)
     app.router.add_post("/api/panel/write", api_panel_write)
     app.router.add_get("/api/vendor/status", api_vendor_status)
+    app.router.add_get("/api/panel/read", api_program_read)
     app.router.add_get("/api/monitor", ws_monitor)
     app["devices"] = []
     app["channel_names"] = {}

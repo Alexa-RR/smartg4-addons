@@ -1,4 +1,10 @@
-"""Vendor button-programming frames (undocumented protocol variant).
+"""Vendor button-programming frames — capture-and-replay (SUPERSEDED).
+
+Superseded on 2026-09-15 by :mod:`pysmartg4.vendor_cipher` and
+:mod:`pysmartg4.vendor_program`: the header "obfuscation" described below was
+reversed from the Smart Cloud executable (per-byte rotate + XOR keyed by the
+string ``"SMARTBUS"``), so frames are now built from scratch for any panel and
+no capture is needed. This module is kept only as a fallback.
 
 The vendor's Smart Cloud programs panel buttons with frames that are NOT
 the documented S-BUS format: after the `SMARTCLOUD` signature they carry
