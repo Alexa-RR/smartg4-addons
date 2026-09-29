@@ -461,12 +461,27 @@ async def _program_exchange(
     return None
 
 
-def _program_source(app: web.Application) -> dict:
-    """Source identity for capture-free frames, taken from the live bus."""
-    bus: SmartG4Bus = app["bus"]
+# Panels only answer programming/config frames from the vendor PC identity —
+# device 254 on the panel's own subnet, announcing the virtual type 0xFFFE —
+# the address Smart Cloud uses. Verified live: a panel replies to reads from
+# 1.254/0xFFFE but ignores the add-on's own bus address (238.238 / 0xEEEE),
+# so every 0xE00x/0xE01x programming frame is sent as this identity.
+PROGRAM_SOURCE_DEVICE = 254
+PROGRAM_SOURCE_TYPE = 0xFFFE
+
+
+def _program_source(
+    app: web.Application, panel: DeviceAddress | None = None
+) -> dict:
+    """Vendor-PC source identity for programming/config frames.
+
+    `panel` sets the subnet (frames must originate on the panel's own subnet);
+    it falls back to subnet 1 when unknown.
+    """
+    subnet = panel.subnet if panel is not None else 1
     return {
-        "source": bus.sender,
-        "source_type": bus.sender_type,
+        "source": DeviceAddress(subnet, PROGRAM_SOURCE_DEVICE),
+        "source_type": PROGRAM_SOURCE_TYPE,
         "source_ip": app["local_ip"],
     }
 
@@ -478,7 +493,7 @@ async def _program_read(
     page: int = FIRST_PAGE,
     **kwargs,
 ) -> dict | None:
-    frame = build_read_frame(button, page, panel, **_program_source(app))
+    frame = build_read_frame(button, page, panel, **_program_source(app, panel))
     return await _program_exchange(
         app, frame, READ_RESPONSE, button, panel=panel, **kwargs
     )
@@ -487,7 +502,7 @@ async def _program_read(
 async def _program_read_label(
     app: web.Application, panel: DeviceAddress, button: int, **kwargs
 ) -> str | None:
-    frame = build_label_read_frame(button, panel, **_program_source(app))
+    frame = build_label_read_frame(button, panel, **_program_source(app, panel))
     reply = await _program_exchange(
         app, frame, LABEL_READ_RESPONSE, button, panel=panel, **kwargs
     )
@@ -504,7 +519,7 @@ async def _program_prepare_write(
     writes all had it, so mirror the sequence. Returns True if the panel
     acked, False if any step went unanswered (the write is still attempted).
     """
-    src = _program_source(app)
+    src = _program_source(app, panel)
     modes = await _program_exchange(
         app, build_keymode_read_frame(panel, **src), KEYMODE_READ_RESPONSE,
         panel=panel,
@@ -569,7 +584,7 @@ async def _program_write_button(
     Each command becomes one (button, page) entry via opcode 0xE002; the entry
     is read back (0xE000/0xE001) and compared. Returns a per-page report.
     """
-    src = _program_source(app)
+    src = _program_source(app, panel)
     handshake = await _program_prepare_write(app, panel)
     pages = []
     # Pages are 1-based on the wire (every Smart Cloud frame says so); page 1
@@ -734,7 +749,7 @@ async def api_panel_live(request: web.Request) -> web.Response:
     # the flash decode when a key doesn't answer.
     try:
         live_labels = await pc.read_key_remarks(
-            app["bus"], panel, buttons, **_program_source(app), retries=1
+            app["bus"], panel, buttons, **_program_source(app, panel), retries=1
         )
     except Exception:  # noqa: BLE001 - labels are best-effort
         live_labels = []
@@ -765,7 +780,7 @@ async def api_panel_settings(request: web.Request) -> web.Response:
     panel = DeviceAddress.parse(target)
     device_type = _known_device_type(app, target)
     keys = _panel_button_count(device_type)
-    src = _program_source(app)
+    src = _program_source(app, panel)
     out: dict = {"ok": True, "target": target, "keys": keys}
 
     modes = await pc.read_key_modes(bus, panel, **src)
@@ -811,7 +826,7 @@ async def api_panel_settings_write(request: web.Request) -> web.Response:
     body = await request.json()
     target = body["target"]
     panel = DeviceAddress.parse(target)
-    src = _program_source(app)
+    src = _program_source(app, panel)
     report: dict = {}
 
     if "modes" in body:
@@ -922,7 +937,7 @@ async def api_panel_led(request: web.Request) -> web.Response:
             bus, panel,
             led=int(body["led"]) if "led" in body else None,
             backlight=int(body["backlight"]) if "backlight" in body else None,
-            **_program_source(app), retries=1,
+            **_program_source(app, panel), retries=1,
         )
     _LOGGER.info("led: %s -> %s", body["target"], report)
     return web.json_response({"ok": True, **report})
@@ -1100,7 +1115,7 @@ async def api_panel_write(request: web.Request) -> web.Response:
         if label is not None and body.get("write_label", True):
             result["label_acked"] = await pc.write_key_remark(
                 app["bus"], target, int(body["index"]), str(label),
-                **_program_source(app),
+                **_program_source(app, target),
             )
         if not report["verified"]:
             result["error"] = (
