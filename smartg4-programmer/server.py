@@ -776,6 +776,70 @@ async def api_program_read(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, **result})
 
 
+async def api_panel_led_probe(request: web.Request) -> web.Response:
+    """READ-ONLY probe: ask a panel for its indicator/LED level and report
+    whatever it sends back, undecoded, so the frame format can be reversed.
+
+    Sends the vendor's ReadPanelLEDLevel opcode 0xE0E8 to the panel and
+    records every frame the panel emits for a short window — both standard
+    (0xAAAA) and scrambled (0x4563) — without interpreting or changing
+    anything. Query: target=<subnet.device>, opcode=<hex, default 0xE0E8>,
+    payload=<hex, default empty>, secs=<float, default 2>.
+
+    This never writes to the panel; it only reads.
+    """
+    app = request.app
+    bus: SmartG4Bus = app["bus"]
+    panel = DeviceAddress.parse(request.query["target"])
+    opcode = int(request.query.get("opcode", "0xE0E8"), 0)
+    payload = bytes.fromhex(request.query.get("payload", ""))
+    secs = min(float(request.query.get("secs", "2")), 5.0)
+
+    seen: list[dict] = []
+
+    def on_raw(data: bytes, _addr) -> None:
+        if len(data) < 27 or data[4:14] != b"SMARTCLOUD":
+            return
+        marker = data[14:16]
+        try:
+            if marker == b"\xaa\xaa":
+                pkt = Packet.decode(data)
+            elif marker == b"\x45\x63":
+                pkt = Packet.decode(from_vendor_frame(data))
+            else:
+                return
+        except ValueError:
+            return
+        if pkt.source != panel:
+            return  # only the panel we probed; our own echo has our source
+        seen.append(
+            {
+                "frame": "standard" if marker == b"\xaa\xaa" else "vendor",
+                "opcode": f"0x{pkt.opcode:04X}",
+                "name": opcode_name(pkt.opcode),
+                "payload": pkt.payload.hex(),
+            }
+        )
+
+    unsubscribe = bus.on_raw(on_raw)
+    try:
+        # Try as a standard frame (0x2F02/0xE0E8 are not in the scrambled
+        # key-config family, so a normal telegram is the likely form).
+        bus.send(panel, opcode, payload=payload)
+        await asyncio.sleep(secs)
+    finally:
+        unsubscribe()
+
+    _LOGGER.info(
+        "led-probe: %s opcode 0x%04X -> %d reply frame(s): %s",
+        panel, opcode, len(seen), seen or "none",
+    )
+    return web.json_response(
+        {"ok": True, "target": str(panel), "sent_opcode": f"0x{opcode:04X}",
+         "replies": seen}
+    )
+
+
 async def api_panel_buttons(request: web.Request) -> web.Response:
     """A panel's buttons: read live from the panel, backup as fill-in.
 
@@ -1195,6 +1259,7 @@ def build_app() -> web.Application:
     app.router.add_post("/api/panel/write", api_panel_write)
     app.router.add_get("/api/vendor/status", api_vendor_status)
     app.router.add_get("/api/panel/read", api_program_read)
+    app.router.add_get("/api/panel/led", api_panel_led_probe)
     app.router.add_get("/api/monitor", ws_monitor)
     app["devices"] = []
     app["channel_names"] = {}
