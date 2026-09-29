@@ -192,6 +192,11 @@
 
   /* pages tabs */
   .pgtabs { display: flex; gap: 4px; padding: 12px 20px 0; border-bottom: 1px solid var(--divider); }
+  .settings { border-top: 1px solid var(--divider); padding: 10px 20px 16px; }
+  .settings summary { cursor: pointer; font-weight: 500; font-size: 14px; padding: 6px 0; }
+  .settings h4 { margin: 14px 0 8px; font-size: 12.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-2); }
+  .sgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+  .chk { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 14px; }
   .pgtab { padding: 9px 15px; border-radius: 8px 8px 0 0; font-size: 13px; font-weight: 500;
     color: var(--text-2); cursor: pointer; border-bottom: 2px solid transparent; transition: .15s; }
   .pgtab:hover { color: var(--text); }
@@ -415,6 +420,10 @@
         <div class="btn-grid" id="btngrid"></div>
         <aside class="editor" id="editor"></aside>
       </div>
+      <details class="settings" id="settings">
+        <summary>Panel settings <span class="hint" id="settings-state">— not loaded</span></summary>
+        <div id="settings-body"></div>
+      </details>
     </div>
   </div>
 
@@ -572,7 +581,7 @@ async function editDevice(id, keepBtn){
   document.getElementById('m-sub').textContent=`${d.addr} · ${d.raw.type_name}`;
   document.getElementById('pgtabs').innerHTML='';
   document.getElementById('overlay').classList.add('show');
-  document.getElementById('btngrid').innerHTML='<div style="color:var(--text-2);padding:20px">Loading panel configuration…</div>';
+  document.getElementById('btngrid').innerHTML='<div style="color:var(--text-2);padding:20px">Reading buttons from the panel…</div>';
   document.getElementById('editor').innerHTML='';
   try{
     const r = await fetch(`api/panel/buttons?target=${d.addr}`);
@@ -583,7 +592,8 @@ async function editDevice(id, keepBtn){
               : j.source === 'live+backup' ? `read live from the panel (labels/backup: ${j.backup_file})`
               : `from backup ${j.backup_file} — panel did not answer live reads`;
     document.getElementById('m-sub').textContent=`${d.addr} · ${d.raw.type_name} · ${src}`;
-    renderButtons(); renderEditor();
+    j.buttons.forEach(b=>{ b._orig_label=b.label||''; });
+    renderButtons(); renderEditor(); loadSettings(d.addr);
   }catch(e){
     document.getElementById('btngrid').innerHTML=`
       <div style="grid-column:1/-1;color:var(--text-2);padding:20px">
@@ -708,16 +718,9 @@ function renderEditor(){
     <button class="btn btn-primary" onclick="writeButton()" style="margin-top:14px">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4 20-7z"/></svg>
       Write to panel</button>
-    ${VENDOR.can_write
-      ? `<div class="ha-note" style="margin-top:12px"><b>Writing is available.</b>
-           Changes go out using the panel's own programming protocol, and the button is
-           read back to confirm. The panel is verified before every write, so a template
-           learned from a different panel is refused rather than misapplied.</div>`
-      : `<div class="ha-note" style="margin-top:12px"><b>Writing is not available yet.</b>
-           This add-on learns the panel-programming operation by watching it happen once:
-           with the add-on running, program a single button in the vendor software. From
-           then on, writing works here for that panel. Everything else is live already —
-           <b>Test</b>, <b>rename</b>, and press-to-highlight.</div>`}`;
+    <div class="ha-note" style="margin-top:12px"><b>Writing is available for every panel.</b>
+      Changes go out using the panel's own programming protocol (no vendor software or
+      capture needed); each entry is read back from the panel to confirm.</div>`;
 }
 function updCmd(i,k,v){ current.panel.buttons[curBtn].commands[i][k]=v;
   renderButtons(); if(k==='target') renderEditor(); }
@@ -762,6 +765,7 @@ async function testCmd(i, level){
 async function writeButton(){
   const b=current.panel.buttons[curBtn];
   const body = {target: current.addr, index: b.index, label: b.label,
+    write_label: (b.label||'') !== (b._orig_label||''),
     commands: b.commands.map(c=>({function:c.function, target:c.target, p1:c.p1, p2:c.p2, p3:c.p3}))};
   const post = async payload => {
     const r = await fetch('api/panel/write', {method:'POST',
@@ -943,6 +947,83 @@ async function loadChannels(){
 }
 async function loadVendor(){
   try{ VENDOR = await api('api/vendor/status'); }catch{ /* keep defaults */ }
+}
+
+/* ---------------- panel settings (modes, labels, LED, lock, delays) ---------------- */
+const KEY_MODES = [[0,'Invalid'],[1,'Single on'],[2,'Single off'],[3,'Single on/off'],
+  [4,'Combination on'],[5,'Combination off'],[6,'Combination on/off'],
+  [7,'Separated L/R — pressing on / releasing off'],[8,'Separated L/R — combination on/off'],
+  [9,'Double-click + single on/off'],[10,'Double-click + combination on/off'],
+  [11,'Pressing on / release off'],[12,'Clock'],[13,'Mechanical switch'],[14,'Separated L/R — single on/off']];
+let SETTINGS=null;
+async function loadSettings(addr){
+  SETTINGS=null;
+  const st=document.getElementById('settings-state'); st.textContent='— reading…';
+  document.getElementById('settings-body').innerHTML='';
+  try{
+    const r=await fetch(`api/panel/settings?target=${addr}`); const j=await r.json();
+    if(!j.ok) throw new Error(j.error||'failed');
+    SETTINGS=j; SETTINGS._orig=JSON.parse(JSON.stringify(j));
+    st.textContent=''; renderSettings();
+  }catch(e){ st.textContent=`— ${e.message}`; }
+}
+function renderSettings(){
+  const s=SETTINGS; if(!s) return;
+  const modeSel=(i,cur)=>`<select onchange="SETTINGS.modes[${i}].mode=+this.value">${KEY_MODES.map(([v,n])=>
+    `<option value="${v}" ${v===cur?'selected':''}>${n}</option>`).join('')}</select>`;
+  const keys=Array.from({length:s.keys},(_,i)=>i);
+  const modes = s.modes ? `<div class="sgrid">${keys.map(i=>`<div class="field" style="margin:0"><label>Button ${i+1} mode</label>${modeSel(i,(s.modes[i]||{}).mode??0)}</div>`).join('')}</div>`
+    : '<div class="hint">The panel did not answer the key-mode read.</div>';
+  const delays = s.off_delay ? `<div class="sgrid">${keys.map(i=>`<div class="field" style="margin:0"><label>Button ${i+1} OFF delay (s)</label>
+      <input type="number" min="0" max="3599" value="${s.off_delay[i]??''}" onchange="SETTINGS.off_delay[${i}]=+this.value"></div>`).join('')}</div>` : '';
+  const cur = s.led || {backlight:50, led:50};
+  const led = `<div class="row2">
+      <div class="field" style="margin:0"><label>Button LED brightness <b id="led-v">${cur.led}</b>%</label>
+        <input type="range" min="0" max="100" value="${cur.led}" oninput="document.getElementById('led-v').textContent=this.value"
+               onchange="liveLed('led',+this.value)"></div>
+      <div class="field" style="margin:0"><label>LCD backlight <b id="bl-v">${cur.backlight}</b>%</label>
+        <input type="range" min="0" max="100" value="${cur.backlight}" oninput="document.getElementById('bl-v').textContent=this.value"
+               onchange="liveLed('backlight',+this.value)"></div>
+    </div>
+    <div class="hint">Sliders apply on release — instantly on the panel, and saved into its settings.${s.led?'':' (The panel did not answer the settings read; values shown are defaults.)'}</div>`;
+  const lock = s.lock ? `<label class="chk"><input type="checkbox" ${s.lock.locked?'checked':''} onchange="SETTINGS.lock.value=this.checked?1:0"> Button lock</label>` : '';
+  document.getElementById('settings-body').innerHTML=`
+    <h4>Button modes</h4>${modes}
+    ${s.off_delay?'<h4>OFF delay (mechanical-switch mode)</h4>'+delays:''}
+    <h4>Backlight &amp; LED</h4>${led}
+    ${lock}
+    ${s.remote_address!=null?`<div class="hint">Remote-control address: ${s.remote_address}</div>`:''}
+    <button class="btn btn-primary" style="margin-top:12px" onclick="saveSettings()">Write settings to panel</button>`;
+}
+async function liveLed(kind, value){
+  const s=SETTINGS; if(!s) return;
+  try{
+    const r=await fetch('api/panel/led',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({target:s.target,[kind]:value})});
+    const j=await r.json(); if(!j.ok) throw new Error(j.error||'failed');
+    if(s.led){ s.led[kind]=value; s._orig.led[kind]=value; }
+    const live=j[kind+'_live'];
+    toast(`${kind==='led'?'LED':'Backlight'} set to ${value}%${live?'':' (no live ack)'}${j.stored?', saved':', not saved in settings'}`);
+  }catch(e){ toast(`LED write failed: ${e.message}`); }
+}
+async function saveSettings(){
+  const s=SETTINGS, o=s._orig, body={target:s.target}, same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+  if(s.modes && !same(s.modes,o.modes)) body.modes=s.modes.map(m=>m.mode);
+  if(s.led && !same(s.led,o.led)) body.led=s.led;
+  if(s.lock && !same(s.lock,o.lock)) body.lock=s.lock.value;
+  if(s.off_delay && !same(s.off_delay,o.off_delay)){
+    const changed=s.off_delay.map((v,i)=>[i+1,v]).filter(([k,v])=>v!=null && v!==o.off_delay[k-1]);
+    if(changed.length) body.off_delay=Object.fromEntries(changed);
+  }
+  if(Object.keys(body).length===1){ toast('No settings changed'); return; }
+  if(!confirm(`Write changed settings (${Object.keys(body).filter(k=>k!=='target').join(', ')}) to ${s.target}?`)) return;
+  try{
+    const r=await fetch('api/panel/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const j=await r.json(); if(!j.ok) throw new Error(j.error||'failed');
+    const bad=Object.entries(j.acked).filter(([,v])=>v===false || (typeof v==='object' && Object.values(v).some(x=>x===false))).map(([k])=>k);
+    toast(bad.length?`Panel did not acknowledge: ${bad.join(', ')}`:'Settings written ✓');
+    loadSettings(s.target);
+  }catch(e){ toast(`Write failed: ${e.message}`); }
 }
 async function loadBackups(){
   try{

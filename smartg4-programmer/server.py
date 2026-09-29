@@ -40,7 +40,6 @@ from pysmartg4.naming import (
     write_device_name,
 )
 from pysmartg4.packet import BROADCAST, DeviceAddress, Packet
-from pysmartg4.vendor_cipher import from_vendor_frame
 from pysmartg4.vendor_frame import (
     READ_RESP,
     WRITE_RESP,
@@ -53,18 +52,17 @@ from pysmartg4.vendor_program import (
     KEYMODE_READ_RESPONSE,
     KEYMODE_WRITE_RESPONSE,
     LABEL_READ_RESPONSE,
-    LABEL_WRITE_RESPONSE,
     READ_RESPONSE,
     WRITE_RESPONSE,
     ButtonFunction,
     build_keymode_read_frame,
     build_keymode_write_frame,
     build_label_read_frame,
-    build_label_write_frame,
     build_read_frame,
     build_write_frame,
     parse_response,
 )
+from pysmartg4 import panel_config as pc
 
 APP_DIR = Path(__file__).parent
 GATEWAY = os.environ.get("SMARTG4_GATEWAY", "255.255.255.255")
@@ -436,9 +434,7 @@ async def _program_exchange(
     that panel (several panels answer the same opcodes).
     """
     bus: SmartG4Bus = app["bus"]
-    sent = Packet.decode(from_vendor_frame(frame))
-    strays: list[str] = []
-    for attempt in range(1, retries + 1):
+    for _ in range(retries):
         loop = asyncio.get_running_loop()
         future: asyncio.Future = loop.create_future()
 
@@ -446,64 +442,31 @@ async def _program_exchange(
             if future.done():
                 return
             parsed = parse_response(data)
-            if not parsed:
-                return
             if (
-                parsed.get("opcode") == want_opcode
+                parsed
+                and parsed.get("opcode") == want_opcode
                 and (button is None or parsed.get("button") == button)
                 and (panel is None or parsed.get("source") == str(panel))
             ):
                 future.set_result(parsed)
-            elif len(strays) < 5:
-                strays.append(
-                    f"{parsed['source']} 0x{parsed['opcode']:04X} {parsed['payload']}"
-                )
 
         unsubscribe = bus.on_raw(on_raw)
         try:
             bus.send_raw(frame)
-            reply = await asyncio.wait_for(future, timeout)
-            _LOGGER.info(
-                "vendor 0x%04X -> %s as %s/0x%04X payload %s: reply %s (try %d)",
-                sent.opcode, sent.target, sent.source, sent.source_type,
-                sent.payload.hex(), reply["payload"], attempt,
-            )
-            return reply
+            return await asyncio.wait_for(future, timeout)
         except (TimeoutError, asyncio.TimeoutError):
             continue
         finally:
             unsubscribe()
-    _LOGGER.info(
-        "vendor 0x%04X -> %s as %s/0x%04X payload %s: NO reply after %d tries%s",
-        sent.opcode, sent.target, sent.source, sent.source_type,
-        sent.payload.hex(), retries,
-        f"; other vendor frames seen: {strays}" if strays else "",
-    )
     return None
 
 
-# Smart Cloud programs panels as device 254 on the panel's own subnet with
-# the "virtual PC" type 0xFFFE, and that is the only identity any panel has
-# ever answered programming frames from (captures/*.log, and the add-on's
-# own verified writes, which replayed captured headers). Use it by default
-# rather than the add-on's bus identity (238.238 / 0xEEEE).
-PROGRAM_SOURCE_DEVICE = 254
-PROGRAM_SOURCE_TYPE = 0xFFFE
-
-
-def _program_source(
-    app: web.Application,
-    panel: DeviceAddress | None = None,
-    source: DeviceAddress | None = None,
-    source_type: int | None = None,
-) -> dict:
-    """Source identity for capture-free frames (vendor-like by default)."""
-    if source is None:
-        subnet = panel.subnet if panel is not None else 1
-        source = DeviceAddress(subnet, PROGRAM_SOURCE_DEVICE)
+def _program_source(app: web.Application) -> dict:
+    """Source identity for capture-free frames, taken from the live bus."""
+    bus: SmartG4Bus = app["bus"]
     return {
-        "source": source,
-        "source_type": PROGRAM_SOURCE_TYPE if source_type is None else source_type,
+        "source": bus.sender,
+        "source_type": bus.sender_type,
         "source_ip": app["local_ip"],
     }
 
@@ -513,13 +476,9 @@ async def _program_read(
     panel: DeviceAddress,
     button: int,
     page: int = FIRST_PAGE,
-    identity: dict | None = None,
     **kwargs,
 ) -> dict | None:
-    identity = identity or {}
-    frame = build_read_frame(
-        button, page, panel, **_program_source(app, panel, **identity)
-    )
+    frame = build_read_frame(button, page, panel, **_program_source(app))
     return await _program_exchange(
         app, frame, READ_RESPONSE, button, panel=panel, **kwargs
     )
@@ -528,37 +487,11 @@ async def _program_read(
 async def _program_read_label(
     app: web.Application, panel: DeviceAddress, button: int, **kwargs
 ) -> str | None:
-    frame = build_label_read_frame(button, panel, **_program_source(app, panel))
+    frame = build_label_read_frame(button, panel, **_program_source(app))
     reply = await _program_exchange(
         app, frame, LABEL_READ_RESPONSE, button, panel=panel, **kwargs
     )
     return None if reply is None else reply.get("label", "")
-
-
-async def _program_write_label(
-    app: web.Application, panel: DeviceAddress, button: int, label: str
-) -> bool:
-    """Set one key's label (0xE006) and confirm by reading it back (0xE004).
-
-    The panel acks 0xE006 with 0xE007, but the ack echoes only the key, not
-    the text, so verification is a read-back of the stored label.
-    """
-    src = _program_source(app, panel)
-    await _program_exchange(
-        app,
-        build_label_write_frame(button, label, panel, **src),
-        LABEL_WRITE_RESPONSE,
-        button,
-        panel=panel,
-    )
-    await asyncio.sleep(0.4)
-    stored = await _program_read_label(app, panel, button)
-    ok = stored is not None and stored.strip() == label.strip()
-    _LOGGER.info(
-        "write: %s button %d label %r -> stored %r (%s)",
-        panel, button, label, stored, "ok" if ok else "MISMATCH",
-    )
-    return ok
 
 
 async def _program_prepare_write(
@@ -571,7 +504,7 @@ async def _program_prepare_write(
     writes all had it, so mirror the sequence. Returns True if the panel
     acked, False if any step went unanswered (the write is still attempted).
     """
-    src = _program_source(app, panel)
+    src = _program_source(app)
     modes = await _program_exchange(
         app, build_keymode_read_frame(panel, **src), KEYMODE_READ_RESPONSE,
         panel=panel,
@@ -608,7 +541,7 @@ async def _program_snapshot(
         )
         if entry is None and label is None:
             silent += 1
-            if index == 2 and silent == 2:
+            if index <= 2 and silent == index:
                 # Two keys with nothing back: not a supported panel / offline.
                 return None
             continue
@@ -630,20 +563,14 @@ async def _program_write_button(
     panel: DeviceAddress,
     button: int,
     commands: list["ButtonCommand"],
-    label: str | None = None,
 ) -> dict:
-    """Write one key capture-free: its label (0xE006) and each function entry.
+    """Write every function entry of one key, capture-free, verifying each.
 
     Each command becomes one (button, page) entry via opcode 0xE002; the entry
-    is read back (0xE000/0xE001) and compared. The label, when given, is
-    written with 0xE006 and read back too. Returns a per-page report plus the
-    label result.
+    is read back (0xE000/0xE001) and compared. Returns a per-page report.
     """
-    src = _program_source(app, panel)
+    src = _program_source(app)
     handshake = await _program_prepare_write(app, panel)
-    label_ok: bool | None = None
-    if label is not None:
-        label_ok = await _program_write_label(app, panel, button, label)
     pages = []
     # Pages are 1-based on the wire (every Smart Cloud frame says so); page 1
     # is the only entry ever verified live, so anything beyond it is a
@@ -678,13 +605,10 @@ async def _program_write_button(
             "ack=%s verified=%s",
             panel, button, page, bool(ack), verified,
         )
-    wrote_something = bool(pages) or label_ok is not None
-    entries_ok = all(p["verified"] for p in pages)
     return {
-        "written": wrote_something,
-        "verified": wrote_something and entries_ok and label_ok is not False,
+        "written": bool(pages),
+        "verified": all(p["verified"] for p in pages) and bool(pages),
         "handshake": handshake,
-        "label_verified": label_ok,
         "pages": pages,
     }
 
@@ -749,24 +673,272 @@ async def api_vendor_status(request: web.Request) -> web.Response:
     )
 
 
+async def api_panel_live(request: web.Request) -> web.Response:
+    """Read a panel's whole button table straight from the panel.
+
+    Query: target=<subnet.device>, buttons=<count, default from catalog>,
+    max_pages=<per-button cap, default 8>. Walks 0xE000 for every button,
+    page 0.. until the panel stops answering or returns an empty entry. Falls
+    back to the .sbd decode for labels when a backup exists. Capture-free.
+    """
+    app = request.app
+    target = request.query["target"]
+    panel = DeviceAddress.parse(target)
+    device_type = _known_device_type(app, target)
+    buttons = int(request.query.get("buttons", "0")) or _panel_button_count(device_type)
+    max_pages = int(request.query.get("max_pages", "8"))
+    labels: dict[int, str] = {}
+    backup_file = None
+    path = BACKUP_DIR / f"{target}.sbd"
+    if path.is_file():
+        try:
+            backup = DeviceBackup.from_sbd(path.read_text(encoding="utf-8"))
+            decoded = decode_panel(backup, device_type)
+            labels = {b["index"]: b.get("label") or "" for b in decoded["buttons"]}
+            backup_file = path.name
+        except (ValueError, KeyError):
+            pass
+    answered = 0
+    result_buttons = []
+    for index in range(1, buttons + 1):
+        commands = []
+        for page in range(FIRST_PAGE, FIRST_PAGE + max_pages):
+            entry = await _program_read(app, panel, index, page)
+            if entry is None:
+                break
+            answered += 1
+            fn = entry.get("function", 0)
+            if fn in (0, 0xFF):
+                break
+            commands.append(
+                {
+                    "page": page,
+                    "function": fn,
+                    "function_name": _function_name(fn),
+                    "target": entry["target"],
+                    "p1": entry["p1"],
+                    "p2": entry["p2"],
+                    "p3": entry["p3"],
+                }
+            )
+        result_buttons.append(
+            {"index": index, "label": labels.get(index, ""), "commands": commands}
+        )
+    if answered == 0:
+        return web.json_response(
+            {"ok": False, "error": "the panel did not answer any button read "
+             "(offline, password-protected, or unsupported firmware)"},
+            status=504,
+        )
+    # Labels straight from the panel (0xE004 key remark), falling back to
+    # the flash decode when a key doesn't answer.
+    try:
+        live_labels = await pc.read_key_remarks(
+            app["bus"], panel, buttons, **_program_source(app), retries=1
+        )
+    except Exception:  # noqa: BLE001 - labels are best-effort
+        live_labels = []
+    for b, name in zip(result_buttons, live_labels):
+        if name:
+            b["label"] = name
+    return web.json_response(
+        {
+            "ok": True,
+            "source": "live",
+            "backup_file": backup_file,
+            "buttons": result_buttons,
+        }
+    )
+
+
+async def api_panel_settings(request: web.Request) -> web.Response:
+    """Everything the vendor's Panel form configures besides key functions.
+
+    Query: target=<subnet.device>. Reads key modes, key labels, LED/backlight
+    levels, key lock, mode linking (mutex), per-key OFF delays and joining,
+    and the remote-control address — all live over the panel-programming
+    protocol. Fields a panel doesn't answer come back as null.
+    """
+    app = request.app
+    bus: SmartG4Bus = app["bus"]
+    target = request.query["target"]
+    panel = DeviceAddress.parse(target)
+    device_type = _known_device_type(app, target)
+    keys = _panel_button_count(device_type)
+    src = _program_source(app)
+    out: dict = {"ok": True, "target": target, "keys": keys}
+
+    modes = await pc.read_key_modes(bus, panel, **src)
+    out["modes"] = (
+        [{"mode": m, "name": pc.key_mode_name(m)} for m in modes.modes[:keys]]
+        if modes else None
+    )
+    labels = await pc.read_key_remarks(bus, panel, keys, **src, retries=1)
+    out["labels"] = labels if any(labels) else None
+    led = await pc.read_led_level(bus, panel, **src)
+    out["led"] = (
+        {"backlight": led.backlight, "led": led.led, "enabled": led.enabled,
+         "params": list(led.params), "wide": led.wide, "raw": led.raw.hex()}
+        if led else None
+    )
+    lock = await pc.read_key_lock(bus, panel, **src)
+    out["lock"] = {"value": lock.value, "locked": bool(lock.value)} if lock else None
+    mutex = await pc.read_key_mutex(bus, panel, ddp=(device_type == 0x0095), **src)
+    out["mode_linking"] = list(mutex.flags[:keys]) if mutex else None
+    remote = await pc.read_remote_addr(bus, panel, **src)
+    out["remote_address"] = remote.address if remote else None
+    delays = []
+    joins = []
+    for key in range(1, keys + 1):
+        d = await pc.read_close_delay(bus, panel, key, **src, retries=1)
+        delays.append(d.seconds if d else None)
+        j = await pc.read_assembled(bus, panel, key, **src, retries=1)
+        joins.append(j.joined_to if j else None)
+    out["off_delay"] = delays if any(v is not None for v in delays) else None
+    out["joined_to"] = joins if any(v is not None for v in joins) else None
+    _LOGGER.info("settings: read %s (%d keys)", target, keys)
+    return web.json_response(out)
+
+
+async def api_panel_settings_write(request: web.Request) -> web.Response:
+    """Write a subset of panel settings. Body: {target, ...any of:
+    modes:[int], labels:{key:name}, led:{backlight,led,enabled,params,wide},
+    lock:int, mode_linking:[0/1], off_delay:{key:seconds},
+    joined_to:{key:joined_key}}. Each write is acknowledged by the panel;
+    the response reports per-field ack status."""
+    app = request.app
+    bus: SmartG4Bus = app["bus"]
+    body = await request.json()
+    target = body["target"]
+    panel = DeviceAddress.parse(target)
+    src = _program_source(app)
+    report: dict = {}
+
+    if "modes" in body:
+        report["modes"] = await pc.write_key_modes(
+            bus, panel, [int(m) for m in body["modes"]], **src
+        )
+    if "labels" in body:
+        report["labels"] = {}
+        for key, name in body["labels"].items():
+            report["labels"][key] = await pc.write_key_remark(
+                bus, panel, int(key), str(name), **src
+            )
+    if "led" in body:
+        led = body["led"]
+        if isinstance(led, dict) and "backlight" in led:
+            level = pc.LedLevel(
+                backlight=int(led.get("backlight", 0)),
+                led=int(led.get("led", 0)),
+                enabled=bool(led.get("enabled", True)),
+                params=tuple(int(x) for x in led.get("params", (0, 0, 0, 0))),
+                wide=bool(led.get("wide", False)),
+            )
+            report["led"] = await pc.write_led_level(bus, panel, level, **src)
+        else:
+            report["led"] = False
+    if "lock" in body:
+        report["lock"] = await pc.write_key_lock(bus, panel, int(body["lock"]), **src)
+    if "mode_linking" in body:
+        report["mode_linking"] = await pc.write_key_mutex(
+            bus, panel, [int(f) for f in body["mode_linking"]], **src
+        )
+    if "off_delay" in body:
+        report["off_delay"] = {}
+        for key, seconds in body["off_delay"].items():
+            report["off_delay"][key] = await pc.write_close_delay(
+                bus, panel, int(key), int(seconds), **src
+            )
+    if "joined_to" in body:
+        report["joined_to"] = {}
+        for key, joined in body["joined_to"].items():
+            report["joined_to"][key] = await pc.write_assembled(
+                bus, panel, int(key), int(joined), **src
+            )
+    _LOGGER.info("settings: wrote %s -> %s", target, report)
+    return web.json_response({"ok": True, "target": target, "acked": report})
+
+
+def _panel_button_count(device_type: int | None) -> int:
+    """How many keys to walk on a panel: known layouts first, then catalog."""
+    from pysmartg4.device_catalog import lookup
+
+    if device_type == 0x0095:
+        return 16  # SV-DDP: 4 keys x 4 pages in the flash layout
+    info = lookup(device_type) if device_type is not None else None
+    if info and info.is_panel and info.channels:
+        return info.channels
+    return 8
+
+
+_FUNCTION_NAMES = {
+    0x55: "scene",
+    0x56: "sequence",
+    0x57: "timer",
+    0x58: "universal_switch",
+    0x59: "single_channel",
+    0x5C: "curtain",
+    0x5D: "infrared",
+    0x5E: "sms",
+    0x5F: "panel_control",
+    0x64: "broadcast_scene",
+    0x65: "broadcast_channel",
+    0x66: "security",
+    0x67: "zone_audio",
+    0x68: "reversing",
+    0x69: "hotel_service",
+}
+
+
+def _function_name(fn: int) -> str:
+    return _FUNCTION_NAMES.get(fn, f"0x{fn:02X}")
+
+
+async def api_panel_led(request: web.Request) -> web.Response:
+    """Set a panel's LED or backlight intensity live, and store it.
+
+    Body: {target, led?: 0-100, backlight?: 0-100, persist?: true}.
+    Live change via Panel_Control 0xE3D8 (type 14 LED / 13 LCD); with
+    persist (default) the new level is also written into the panel's
+    settings record (0xE012) so it survives a power cycle.
+    """
+    from pysmartg4.panel_control import (
+        persist_led_levels, set_backlight_level, set_led_level,
+    )
+
+    app = request.app
+    bus: SmartG4Bus = app["bus"]
+    body = await request.json()
+    panel = DeviceAddress.parse(body["target"])
+    report: dict = {}
+    if "led" in body:
+        report["led_live"] = await set_led_level(bus, panel, int(body["led"]))
+    if "backlight" in body:
+        report["backlight_live"] = await set_backlight_level(
+            bus, panel, int(body["backlight"])
+        )
+    if body.get("persist", True) and ("led" in body or "backlight" in body):
+        report["stored"] = await persist_led_levels(
+            bus, panel,
+            led=int(body["led"]) if "led" in body else None,
+            backlight=int(body["backlight"]) if "backlight" in body else None,
+            **_program_source(app), retries=1,
+        )
+    _LOGGER.info("led: %s -> %s", body["target"], report)
+    return web.json_response({"ok": True, **report})
+
+
 async def api_program_read(request: web.Request) -> web.Response:
     """Read one key's current function config straight from the panel.
 
-    Query: target=<subnet.device>, button=<n>, page=<n, default 1>,
-    and optionally src=<subnet.device> / src_type=<hex> to send as a
-    different identity (default: device 254 on the panel's subnet, 0xFFFE).
+    Query: target=<subnet.device>, button=<n>, page=<n, default 1>.
     Capture-free — no backup or template required.
     """
     app = request.app
     panel = DeviceAddress.parse(request.query["target"])
     button = int(request.query["button"])
     page = int(request.query.get("page", str(FIRST_PAGE)))
-    identity: dict = {}
-    if "src" in request.query:
-        identity["source"] = DeviceAddress.parse(request.query["src"])
-    if "src_type" in request.query:
-        identity["source_type"] = int(request.query["src_type"], 0)
-    result = await _program_read(app, panel, button, page, identity=identity)
+    result = await _program_read(app, panel, button, page)
     if result is None:
         return web.json_response(
             {"ok": False, "error": "the panel did not answer (offline, "
@@ -910,36 +1082,32 @@ async def api_panel_write(request: web.Request) -> web.Response:
     # Preferred path: the vendor's own button-write operation, built from
     # scratch (no capture needed) now that the header cipher is known
     # (pysmartg4.vendor_program). Verifies by reading each entry back.
-    label = body.get("label")
-    if commands or label is not None:
+    if commands:
         if not body.get("confirm"):
             result["method"] = "capture-free"
             result["vendor"] = {"available": True, "capture_free": True}
             return web.json_response(result)
         report = await _program_write_button(
-            app, target, int(body["index"]), commands, label=label
+            app, target, int(body["index"]), commands
         )
         result.update(
             method="capture-free",
             written=report["written"],
             verified=report["verified"],
-            label_verified=report["label_verified"],
             pages=report["pages"],
         )
+        label = body.get("label")
+        if label is not None and body.get("write_label", True):
+            result["label_acked"] = await pc.write_key_remark(
+                app["bus"], target, int(body["index"]), str(label),
+                **_program_source(app),
+            )
         if not report["verified"]:
-            if report["label_verified"] is False and all(
-                p["verified"] for p in report["pages"]
-            ):
-                result["error"] = (
-                    "The commands were written but the label did not stick — "
-                    "the panel may reject that text or be password-protected."
-                )
-            else:
-                result["error"] = (
-                    "The panel did not confirm the change — it may be offline, "
-                    "protected by a programming password, or on a firmware "
-                    "whose button opcode differs. Re-read the panel and retry."
-                )
+            result["error"] = (
+                "The panel did not confirm the change — it may be offline, "
+                "protected by a programming password, or on a firmware whose "
+                "button opcode differs. Re-read the panel and try again."
+            )
         return web.json_response(result)
 
     # Fallback: a captured vendor template, if one was learned by watching
@@ -1195,6 +1363,10 @@ def build_app() -> web.Application:
     app.router.add_post("/api/panel/write", api_panel_write)
     app.router.add_get("/api/vendor/status", api_vendor_status)
     app.router.add_get("/api/panel/read", api_program_read)
+    app.router.add_get("/api/panel/live", api_panel_live)
+    app.router.add_get("/api/panel/settings", api_panel_settings)
+    app.router.add_post("/api/panel/settings", api_panel_settings_write)
+    app.router.add_post("/api/panel/led", api_panel_led)
     app.router.add_get("/api/monitor", ws_monitor)
     app["devices"] = []
     app["channel_names"] = {}
