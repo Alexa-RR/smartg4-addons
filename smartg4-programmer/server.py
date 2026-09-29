@@ -40,6 +40,7 @@ from pysmartg4.naming import (
     write_device_name,
 )
 from pysmartg4.packet import BROADCAST, DeviceAddress, Packet
+from pysmartg4.vendor_cipher import from_vendor_frame
 from pysmartg4.vendor_frame import (
     READ_RESP,
     WRITE_RESP,
@@ -433,7 +434,9 @@ async def _program_exchange(
     that panel (several panels answer the same opcodes).
     """
     bus: SmartG4Bus = app["bus"]
-    for _ in range(retries):
+    sent = Packet.decode(from_vendor_frame(frame))
+    strays: list[str] = []
+    for attempt in range(1, retries + 1):
         loop = asyncio.get_running_loop()
         future: asyncio.Future = loop.create_future()
 
@@ -441,31 +444,64 @@ async def _program_exchange(
             if future.done():
                 return
             parsed = parse_response(data)
+            if not parsed:
+                return
             if (
-                parsed
-                and parsed.get("opcode") == want_opcode
+                parsed.get("opcode") == want_opcode
                 and (button is None or parsed.get("button") == button)
                 and (panel is None or parsed.get("source") == str(panel))
             ):
                 future.set_result(parsed)
+            elif len(strays) < 5:
+                strays.append(
+                    f"{parsed['source']} 0x{parsed['opcode']:04X} {parsed['payload']}"
+                )
 
         unsubscribe = bus.on_raw(on_raw)
         try:
             bus.send_raw(frame)
-            return await asyncio.wait_for(future, timeout)
+            reply = await asyncio.wait_for(future, timeout)
+            _LOGGER.info(
+                "vendor 0x%04X -> %s as %s/0x%04X payload %s: reply %s (try %d)",
+                sent.opcode, sent.target, sent.source, sent.source_type,
+                sent.payload.hex(), reply["payload"], attempt,
+            )
+            return reply
         except (TimeoutError, asyncio.TimeoutError):
             continue
         finally:
             unsubscribe()
+    _LOGGER.info(
+        "vendor 0x%04X -> %s as %s/0x%04X payload %s: NO reply after %d tries%s",
+        sent.opcode, sent.target, sent.source, sent.source_type,
+        sent.payload.hex(), retries,
+        f"; other vendor frames seen: {strays}" if strays else "",
+    )
     return None
 
 
-def _program_source(app: web.Application) -> dict:
-    """Source identity for capture-free frames, taken from the live bus."""
-    bus: SmartG4Bus = app["bus"]
+# Smart Cloud programs panels as device 254 on the panel's own subnet with
+# the "virtual PC" type 0xFFFE, and that is the only identity any panel has
+# ever answered programming frames from (captures/*.log, and the add-on's
+# own verified writes, which replayed captured headers). Use it by default
+# rather than the add-on's bus identity (238.238 / 0xEEEE).
+PROGRAM_SOURCE_DEVICE = 254
+PROGRAM_SOURCE_TYPE = 0xFFFE
+
+
+def _program_source(
+    app: web.Application,
+    panel: DeviceAddress | None = None,
+    source: DeviceAddress | None = None,
+    source_type: int | None = None,
+) -> dict:
+    """Source identity for capture-free frames (vendor-like by default)."""
+    if source is None:
+        subnet = panel.subnet if panel is not None else 1
+        source = DeviceAddress(subnet, PROGRAM_SOURCE_DEVICE)
     return {
-        "source": bus.sender,
-        "source_type": bus.sender_type,
+        "source": source,
+        "source_type": PROGRAM_SOURCE_TYPE if source_type is None else source_type,
         "source_ip": app["local_ip"],
     }
 
@@ -475,9 +511,13 @@ async def _program_read(
     panel: DeviceAddress,
     button: int,
     page: int = FIRST_PAGE,
+    identity: dict | None = None,
     **kwargs,
 ) -> dict | None:
-    frame = build_read_frame(button, page, panel, **_program_source(app))
+    identity = identity or {}
+    frame = build_read_frame(
+        button, page, panel, **_program_source(app, panel, **identity)
+    )
     return await _program_exchange(
         app, frame, READ_RESPONSE, button, panel=panel, **kwargs
     )
@@ -486,7 +526,7 @@ async def _program_read(
 async def _program_read_label(
     app: web.Application, panel: DeviceAddress, button: int, **kwargs
 ) -> str | None:
-    frame = build_label_read_frame(button, panel, **_program_source(app))
+    frame = build_label_read_frame(button, panel, **_program_source(app, panel))
     reply = await _program_exchange(
         app, frame, LABEL_READ_RESPONSE, button, panel=panel, **kwargs
     )
@@ -503,7 +543,7 @@ async def _program_prepare_write(
     writes all had it, so mirror the sequence. Returns True if the panel
     acked, False if any step went unanswered (the write is still attempted).
     """
-    src = _program_source(app)
+    src = _program_source(app, panel)
     modes = await _program_exchange(
         app, build_keymode_read_frame(panel, **src), KEYMODE_READ_RESPONSE,
         panel=panel,
@@ -540,7 +580,7 @@ async def _program_snapshot(
         )
         if entry is None and label is None:
             silent += 1
-            if index <= 2 and silent == index:
+            if index == 2 and silent == 2:
                 # Two keys with nothing back: not a supported panel / offline.
                 return None
             continue
@@ -568,7 +608,7 @@ async def _program_write_button(
     Each command becomes one (button, page) entry via opcode 0xE002; the entry
     is read back (0xE000/0xE001) and compared. Returns a per-page report.
     """
-    src = _program_source(app)
+    src = _program_source(app, panel)
     handshake = await _program_prepare_write(app, panel)
     pages = []
     # Pages are 1-based on the wire (every Smart Cloud frame says so); page 1
@@ -675,14 +715,21 @@ async def api_vendor_status(request: web.Request) -> web.Response:
 async def api_program_read(request: web.Request) -> web.Response:
     """Read one key's current function config straight from the panel.
 
-    Query: target=<subnet.device>, button=<n>, page=<n, default 1>.
+    Query: target=<subnet.device>, button=<n>, page=<n, default 1>,
+    and optionally src=<subnet.device> / src_type=<hex> to send as a
+    different identity (default: device 254 on the panel's subnet, 0xFFFE).
     Capture-free — no backup or template required.
     """
     app = request.app
     panel = DeviceAddress.parse(request.query["target"])
     button = int(request.query["button"])
     page = int(request.query.get("page", str(FIRST_PAGE)))
-    result = await _program_read(app, panel, button, page)
+    identity: dict = {}
+    if "src" in request.query:
+        identity["source"] = DeviceAddress.parse(request.query["src"])
+    if "src_type" in request.query:
+        identity["source_type"] = int(request.query["src_type"], 0)
+    result = await _program_read(app, panel, button, page, identity=identity)
     if result is None:
         return web.json_response(
             {"ok": False, "error": "the panel did not answer (offline, "
