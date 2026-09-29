@@ -2,7 +2,7 @@
 
 from .bus import SmartG4Bus
 from .commands import COMMANDS, opcode_name, parse_payload, encode_payload
-from .discovery import DiscoveredDevice, discover
+from .discovery import DiscoveredDevice, DiscoveredGateway, discover, discover_gateways
 from .packet import (
     BROADCAST,
     SIGNATURE_HDLMIRACLE,
@@ -18,11 +18,13 @@ __all__ = [
     "COMMANDS",
     "DeviceAddress",
     "DiscoveredDevice",
+    "DiscoveredGateway",
     "Packet",
     "SIGNATURE_HDLMIRACLE",
     "SIGNATURE_SMARTCLOUD",
     "SmartG4Bus",
     "discover",
+    "discover_gateways",
     "encode_payload",
     "opcode_name",
     "parse_payload",

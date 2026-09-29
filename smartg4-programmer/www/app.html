@@ -547,7 +547,7 @@ function renderDevices(){
 }
 
 /* ---------------- button programmer ---------------- */
-async function editDevice(id){
+async function editDevice(id, keepBtn){
   const d=DEVICES.find(x=>x.id===id); current=d;
   if(d.type!=='panel'){ openChannelControl(d); return; }
   if(![0x0095, 0x0119].includes(parseInt(d.raw.device_type,16))){
@@ -567,7 +567,7 @@ async function editDevice(id){
       </div>`;
     return;
   }
-  curBtn=0;
+  if(!keepBtn) curBtn=0;
   document.getElementById('m-name').textContent=d.name;
   document.getElementById('m-sub').textContent=`${d.addr} · ${d.raw.type_name}`;
   document.getElementById('pgtabs').innerHTML='';
@@ -579,14 +579,17 @@ async function editDevice(id){
     const j = await r.json();
     if(!j.ok) throw new Error(j.error||'decode failed');
     current.panel = j;
-    document.getElementById('m-sub').textContent=`${d.addr} · ${d.raw.type_name} · from ${j.backup_file}`;
+    const src = j.source === 'live' ? 'read live from the panel'
+              : j.source === 'live+backup' ? `read live from the panel (labels/backup: ${j.backup_file})`
+              : `from backup ${j.backup_file} — panel did not answer live reads`;
+    document.getElementById('m-sub').textContent=`${d.addr} · ${d.raw.type_name} · ${src}`;
     renderButtons(); renderEditor();
   }catch(e){
     document.getElementById('btngrid').innerHTML=`
       <div style="grid-column:1/-1;color:var(--text-2);padding:20px">
         <p style="margin:0 0 12px">${e.message}.</p>
-        <p style="margin:0 0 16px">The button programmer reads the panel's flash image.
-        Run a backup (~5 min) and re-open this dialog.</p>
+        <p style="margin:0 0 16px">The panel did not answer live reads and there is no flash
+        backup to fall back on. Check it is online, or run a backup (~5 min) and re-open this dialog.</p>
         <button class="btn btn-primary" onclick="closeModal();menuBackup('${d.id}')">Backup this panel now</button>
       </div>`;
   }
@@ -769,11 +772,17 @@ async function writeButton(){
     const dry = await post(body);                       // dry run first
     if(!dry.ok) throw new Error(dry.error||'failed');
     const vendor = dry.vendor && dry.vendor.available;
+    const captureFree = vendor && dry.vendor.capture_free;
     if(!vendor && !dry.changed_pages.length){ toast('No changes to write'); return; }
-    if(vendor && !dry.vendor.addresses_panel){
+    if(vendor && !captureFree && !dry.vendor.addresses_panel){
       toast(`Cannot write: ${dry.vendor.detail}`); return;
     }
-    const what = vendor
+    const n = body.commands.length;
+    const what = captureFree
+      ? `Write button ${b.index} of ${current.addr} using the panel's own programming protocol?\n`
+        + (n > 1 ? `${n} commands → ${n} function entries (only the first entry is field-proven).\n` : '')
+        + `Each entry is read back from the panel afterwards to confirm.`
+      : vendor
       ? `Write button ${b.index} of ${current.addr} using the panel's own programming protocol?\n`
         + `Verified against this panel: ${dry.vendor.detail}.\n`
         + `The button is read back afterwards to confirm.`
@@ -784,8 +793,10 @@ async function writeButton(){
     if(!res.ok) throw new Error(res.error||'failed');
     if(res.verified){
       toast(`Button ${b.index} written and verified ✓${res.note ? ' — ' + res.note : ''}`);
+      editDevice(current.id, true);   // re-read the panel so the grid shows what it has now
     }else{
-      toast(res.error || 'Write could not be verified');
+      const pages = (res.pages||[]).map(p=>`entry ${p.page}: ${p.acked?'acked':'no ack'}, ${p.verified?'verified':'NOT verified'}`).join('; ');
+      toast((res.error || 'Write could not be verified') + (pages ? ` (${pages})` : ''));
     }
   }catch(e){ toast(`Write failed: ${e.message}`); }
 }

@@ -25,6 +25,7 @@ from pysmartg4.backup import (
     stage_page,
 )
 from pysmartg4.ddp import (
+    LAYOUTS,
     ButtonCommand,
     apply_button,
     decode_panel,
@@ -47,9 +48,16 @@ from pysmartg4.vendor_frame import (
     parse_button_payload,
 )
 from pysmartg4.vendor_program import (
+    FIRST_PAGE,
+    KEYMODE_READ_RESPONSE,
+    KEYMODE_WRITE_RESPONSE,
+    LABEL_READ_RESPONSE,
     READ_RESPONSE,
     WRITE_RESPONSE,
     ButtonFunction,
+    build_keymode_read_frame,
+    build_keymode_write_frame,
+    build_label_read_frame,
     build_read_frame,
     build_write_frame,
     parse_response,
@@ -412,14 +420,17 @@ async def _program_exchange(
     app: web.Application,
     frame: bytes,
     want_opcode: int,
-    button: int,
+    button: int | None = None,
     timeout: float = 2.0,
     retries: int = 3,
+    panel: DeviceAddress | None = None,
 ) -> dict | None:
     """Send a capture-free vendor programming frame and await its reply.
 
     Mirrors Smart Cloud: up to `retries` attempts with a short timeout, since
-    these frames collide with the panel's periodic broadcasts.
+    these frames collide with the panel's periodic broadcasts. `button`
+    narrows the match to replies about that key; `panel` to replies from
+    that panel (several panels answer the same opcodes).
     """
     bus: SmartG4Bus = app["bus"]
     for _ in range(retries):
@@ -433,7 +444,8 @@ async def _program_exchange(
             if (
                 parsed
                 and parsed.get("opcode") == want_opcode
-                and parsed.get("button") == button
+                and (button is None or parsed.get("button") == button)
+                and (panel is None or parsed.get("source") == str(panel))
             ):
                 future.set_result(parsed)
 
@@ -459,10 +471,90 @@ def _program_source(app: web.Application) -> dict:
 
 
 async def _program_read(
-    app: web.Application, panel: DeviceAddress, button: int, page: int
+    app: web.Application,
+    panel: DeviceAddress,
+    button: int,
+    page: int = FIRST_PAGE,
+    **kwargs,
 ) -> dict | None:
     frame = build_read_frame(button, page, panel, **_program_source(app))
-    return await _program_exchange(app, frame, READ_RESPONSE, button)
+    return await _program_exchange(
+        app, frame, READ_RESPONSE, button, panel=panel, **kwargs
+    )
+
+
+async def _program_read_label(
+    app: web.Application, panel: DeviceAddress, button: int, **kwargs
+) -> str | None:
+    frame = build_label_read_frame(button, panel, **_program_source(app))
+    reply = await _program_exchange(
+        app, frame, LABEL_READ_RESPONSE, button, panel=panel, **kwargs
+    )
+    return None if reply is None else reply.get("label", "")
+
+
+async def _program_prepare_write(
+    app: web.Application, panel: DeviceAddress
+) -> bool:
+    """Replay Smart Cloud's pre-write handshake: read key modes, write them back.
+
+    The app sends 0xE00A (echoing 0xE009) before every 0xE002 and the panel
+    acks with 0xE00B. Whether the write needs it is unknown; the verified
+    writes all had it, so mirror the sequence. Returns True if the panel
+    acked, False if any step went unanswered (the write is still attempted).
+    """
+    src = _program_source(app)
+    modes = await _program_exchange(
+        app, build_keymode_read_frame(panel, **src), KEYMODE_READ_RESPONSE,
+        panel=panel,
+    )
+    if modes is None:
+        _LOGGER.info("write: %s did not answer 0xE008 key-mode read", panel)
+        return False
+    ack = await _program_exchange(
+        app,
+        build_keymode_write_frame(bytes(modes["modes"]), panel, **src),
+        KEYMODE_WRITE_RESPONSE,
+        panel=panel,
+    )
+    if ack is None:
+        _LOGGER.info("write: %s did not ack 0xE00A key-mode write", panel)
+    return ack is not None
+
+
+async def _program_snapshot(
+    app: web.Application, panel: DeviceAddress, buttons: int
+) -> dict[int, dict] | None:
+    """Read every key's label and first function entry straight from the panel.
+
+    Returns {index: {"label": str | None, "commands": [...]}} or None when
+    the panel doesn't speak the programming protocol (no answer at all for
+    the first keys) — the flash backup is the only source then.
+    """
+    snapshot: dict[int, dict] = {}
+    silent = 0
+    for index in range(1, buttons + 1):
+        entry = await _program_read(app, panel, index, timeout=1.0, retries=2)
+        label = await _program_read_label(
+            app, panel, index, timeout=1.0, retries=1
+        )
+        if entry is None and label is None:
+            silent += 1
+            if index <= 2 and silent == index:
+                # Two keys with nothing back: not a supported panel / offline.
+                return None
+            continue
+        commands = []
+        if entry and entry.get("function", 0) not in (0x00, 0xFF):
+            sub, dev = (int(x) for x in entry["target"].split("."))
+            commands.append(
+                ButtonCommand(
+                    function=entry["function"], subnet=sub, device=dev,
+                    p1=entry["p1"], p2=entry["p2"], p3=entry["p3"],
+                ).as_dict()
+            )
+        snapshot[index] = {"label": label, "commands": commands}
+    return snapshot
 
 
 async def _program_write_button(
@@ -477,8 +569,12 @@ async def _program_write_button(
     is read back (0xE000/0xE001) and compared. Returns a per-page report.
     """
     src = _program_source(app)
+    handshake = await _program_prepare_write(app, panel)
     pages = []
-    for page, cmd in enumerate(commands):
+    # Pages are 1-based on the wire (every Smart Cloud frame says so); page 1
+    # is the only entry ever verified live, so anything beyond it is a
+    # best-effort extension that the read-back will either confirm or not.
+    for page, cmd in enumerate(commands, start=FIRST_PAGE):
         fn = ButtonFunction(
             button=button,
             page=page,
@@ -489,7 +585,8 @@ async def _program_write_button(
             p3=cmd.p3,
         )
         ack = await _program_exchange(
-            app, build_write_frame(fn, panel, **src), WRITE_RESPONSE, button
+            app, build_write_frame(fn, panel, **src), WRITE_RESPONSE, button,
+            panel=panel,
         )
         await asyncio.sleep(0.4)
         back = await _program_read(app, panel, button, page)
@@ -510,6 +607,7 @@ async def _program_write_button(
     return {
         "written": bool(pages),
         "verified": all(p["verified"] for p in pages) and bool(pages),
+        "handshake": handshake,
         "pages": pages,
     }
 
@@ -577,13 +675,13 @@ async def api_vendor_status(request: web.Request) -> web.Response:
 async def api_program_read(request: web.Request) -> web.Response:
     """Read one key's current function config straight from the panel.
 
-    Query: target=<subnet.device>, button=<n>, page=<n, default 0>.
+    Query: target=<subnet.device>, button=<n>, page=<n, default 1>.
     Capture-free — no backup or template required.
     """
     app = request.app
     panel = DeviceAddress.parse(request.query["target"])
     button = int(request.query["button"])
-    page = int(request.query.get("page", "0"))
+    page = int(request.query.get("page", str(FIRST_PAGE)))
     result = await _program_read(app, panel, button, page)
     if result is None:
         return web.json_response(
@@ -595,22 +693,73 @@ async def api_program_read(request: web.Request) -> web.Response:
 
 
 async def api_panel_buttons(request: web.Request) -> web.Response:
-    """Decode a panel's buttons (SV-DDP or SB-6BS) from its .sbd backup."""
+    """A panel's buttons: read live from the panel, backup as fill-in.
+
+    Live (0xE000/0xE004 per key) is the truth — it is what the panel will
+    do when pressed. The flash backup, if any, supplies buttons the panel
+    didn't answer and the 2nd+ commands of multi-command buttons (live
+    reads cover the first function entry only).
+    """
+    app = request.app
     target = request.query["target"]
+    panel = DeviceAddress.parse(target)
+    dtype = _known_device_type(app, target)
     path = BACKUP_DIR / f"{target}.sbd"
-    if not path.is_file():
+
+    decoded: dict | None = None
+    if path.is_file():
+        backup = DeviceBackup.from_sbd(path.read_text(encoding="utf-8"))
+        try:
+            decoded = decode_panel(backup, dtype)
+        except ValueError as err:
+            _LOGGER.warning("%s: backup does not decode — %s", target, err)
+
+    layout = LAYOUTS.get(dtype) if dtype is not None else None
+    buttons = layout.buttons if layout else (
+        len(decoded["buttons"]) if decoded else 0
+    )
+    if not buttons:
         return web.json_response(
-            {"ok": False, "error": "no backup yet — run a flash backup first"},
+            {"ok": False, "error": "no backup and no known button layout for "
+             "this panel type — run a flash backup first"},
             status=404,
         )
-    try:
-        backup = DeviceBackup.from_sbd(path.read_text(encoding="utf-8"))
-        panel = decode_panel(backup, _known_device_type(request.app, target))
-    except ValueError as err:
-        return web.json_response({"ok": False, "error": str(err)}, status=422)
-    panel["ok"] = True
-    panel["backup_file"] = path.name
-    return web.json_response(panel)
+
+    live = await _program_snapshot(app, panel, buttons)
+    if live is None and decoded is None:
+        return web.json_response(
+            {"ok": False, "error": "the panel did not answer live reads and "
+             "there is no backup to fall back on"},
+            status=504,
+        )
+
+    by_index = {b["index"]: b for b in (decoded or {}).get("buttons", [])}
+    merged = []
+    for index in range(1, buttons + 1):
+        stored = by_index.get(index, {"index": index, "label": "", "commands": []})
+        entry = (live or {}).get(index)
+        if entry is None:
+            merged.append({**stored, "live": False})
+            continue
+        commands = entry["commands"]
+        # Keep a backup's extra commands only when the live first entry
+        # agrees with the backup's first record — otherwise the backup is stale.
+        stored_cmds = stored.get("commands", [])
+        if commands and stored_cmds and commands[0] == stored_cmds[0]:
+            commands = commands + stored_cmds[1:]
+        label = entry["label"] if entry["label"] is not None else stored.get("label", "")
+        merged.append({"index": index, "label": label, "commands": commands, "live": True})
+
+    return web.json_response(
+        {
+            "ok": True,
+            "name": (decoded or {}).get("name", ""),
+            "device_type": f"0x{dtype:04X}" if dtype is not None else (decoded or {}).get("device_type"),
+            "buttons": merged,
+            "source": "live+backup" if (live and decoded) else "live" if live else "backup",
+            "backup_file": path.name if decoded else None,
+        }
+    )
 
 
 async def api_panel_write(request: web.Request) -> web.Response:
@@ -627,12 +776,12 @@ async def api_panel_write(request: web.Request) -> web.Response:
     body = await request.json()
     target = DeviceAddress.parse(body["target"])
     path = BACKUP_DIR / f"{target}.sbd"
-    if not path.is_file():
-        return web.json_response(
-            {"ok": False, "error": "no backup — run a flash backup first"},
-            status=404,
-        )
-    backup = DeviceBackup.from_sbd(path.read_text(encoding="utf-8"))
+    # The capture-free path needs no backup; the flash fallback does.
+    backup = (
+        DeviceBackup.from_sbd(path.read_text(encoding="utf-8"))
+        if path.is_file()
+        else None
+    )
     commands = [
         ButtonCommand(
             function=int(str(c.get("function", "0x59")), 0),
@@ -644,16 +793,23 @@ async def api_panel_write(request: web.Request) -> web.Response:
         )
         for c in body["commands"]
     ]
-    try:
-        changed = apply_button(
-            backup,
-            int(body["index"]),
-            body.get("label"),
-            commands,
-            _known_device_type(request.app, str(target)),
-        )
-    except ValueError as err:
-        return web.json_response({"ok": False, "error": str(err)}, status=422)
+    dtype = _known_device_type(request.app, str(target))
+    changed = []
+    if backup is not None:
+        try:
+            changed = apply_button(
+                backup, int(body["index"]), body.get("label"), commands, dtype
+            )
+        except ValueError as err:
+            return web.json_response({"ok": False, "error": str(err)}, status=422)
+    else:
+        layout = LAYOUTS.get(dtype) if dtype is not None else None
+        limit = layout.buttons if layout else 16
+        if not 1 <= int(body["index"]) <= limit:
+            return web.json_response(
+                {"ok": False, "error": f"button index out of range (1-{limit})"},
+                status=422,
+            )
 
     _LOGGER.info(
         "write: %s button %s -> %d command(s), %d page(s) change%s",
@@ -695,8 +851,8 @@ async def api_panel_write(request: web.Request) -> web.Response:
     # Fallback: a captured vendor template, if one was learned by watching
     # Smart Cloud. Only used once proven to address THIS panel.
     store: TemplateStore = app["vendor"]
-    if store.can_write:
-        decoded = decode_panel(backup, _known_device_type(app, str(target)))
+    if store.can_write and backup is not None:
+        decoded = decode_panel(backup, dtype)
         addressed, why = await _vendor_addresses_panel(app, str(target), decoded)
         result["vendor"] = {"available": True, "addresses_panel": addressed,
                             "detail": why}

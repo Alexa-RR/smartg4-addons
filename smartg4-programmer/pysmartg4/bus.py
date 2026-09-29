@@ -86,6 +86,11 @@ class SmartG4Bus(asyncio.DatagramProtocol):
             self._transport.close()
             self._transport = None
 
+    @property
+    def local_ip(self) -> str:
+        """Our own LAN IP as detected at connect time ("0.0.0.0" if unknown)."""
+        return socket.inet_ntoa(self._local_ip)
+
     def _detect_local_ip(self) -> None:
         """Best-effort detection of our LAN IP for the frame preamble."""
         try:

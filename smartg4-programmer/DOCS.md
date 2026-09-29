@@ -10,13 +10,15 @@ as a panel in the HA sidebar (no separate login, proxied through HA).
   relays, DDP panels, sensors, HVAC, Z-Audio), with online status, firmware,
   address, and channel/button counts. A "Take control" banner adopts newly
   found, un-named modules (like ESPHome's adopt flow).
-- **DDP button programmer** — click *Program* on a panel to see its real
-  configuration, decoded from a flash backup: 16 buttons with labels and
-  their "Magic Line" command lists (multi-command buttons included). Edit
-  labels, targets, channels, levels and fades; *Test* fires a command on
-  the bus immediately; *Write to panel* stages the changed flash pages
-  (0xDC15), commits (0xDC16), and verifies by reading everything back.
-  Writing requires the `enable_flash_write` option (see below).
+- **Panel button programmer** — click *Program* on a panel to see its real
+  configuration, read live from the panel with the vendor's own programming
+  protocol (labels and each key's first function entry); a flash backup, if
+  one exists, fills in anything the panel doesn't answer. Edit labels,
+  targets, channels, levels and fades; *Test* fires a command on the bus
+  immediately; *Write to panel* programs the key the way Smart Cloud does
+  (0xE00A handshake, 0xE002 write) and reads it back to verify — no backup
+  and no flash writes needed. The old flash-page path (0xDC15/0xDC16) remains
+  only as a fallback and still requires `enable_flash_write`.
 - **Flash backup / restore groundwork** — back up any module (not just
   panels) to a vendor-compatible `.sbd` under `/share/smartg4`.
 - **Control from Home Assistant** — flip a button to "Control from Home
@@ -57,8 +59,10 @@ a small aiohttp API backed by the `pysmartg4` library:
 - `GET  /api/backup/status` — progress of the running backup
 - `GET  /api/backups` — list saved `.sbd` files
 - `GET  /api/panel/buttons?target=` — decode a panel's buttons from its backup
+- `GET  /api/panel/read?target=&button=&page=1` — one key's function entry, live
 - `POST /api/panel/write` — write one button back (dry-run without
-  `confirm`; real writes additionally need `enable_flash_write`)
+  `confirm`); the capture-free path needs no option, the flash fallback
+  needs `enable_flash_write`
 
 All paths are relative, so the UI works unchanged behind the HA ingress proxy.
 

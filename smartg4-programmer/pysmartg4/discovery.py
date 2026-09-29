@@ -4,6 +4,11 @@ Active: broadcast ReadMACAddress (0xF003) to 255.255 — every module
 answers 0xF004 with its MAC and remark (user-assigned name), and the
 frame header carries its subnet/device/type.
 
+Gateways: :func:`discover_gateways` finds the RSIP / Z-Audio gateway(s)
+without knowing any IP — every module frame arrives as a UDP datagram
+sent from the gateway that relayed it, so the sender addresses of
+genuine module traffic are the gateways.
+
 Passive: while listening, record the header of every telegram seen, so
 even devices that ignore 0xF003 show up once they broadcast anything
 (sensors, panels and scene modules chat regularly).
@@ -17,7 +22,7 @@ from typing import Any
 
 from .bus import SmartG4Bus
 from .device_types import device_type_name
-from .packet import BROADCAST, Packet
+from .packet import BROADCAST, VIRTUAL_DEVICE_TYPE, Packet
 
 
 @dataclass
@@ -149,3 +154,84 @@ async def discover(
         unsubscribe()
 
     return sorted(found.values(), key=lambda d: (d.subnet, d.device))
+
+
+@dataclass
+class DiscoveredGateway:
+    """An RSIP / Z-Audio gateway seen relaying bus traffic onto the LAN."""
+
+    ip: str
+    frames: int = 0
+    devices: set[tuple[int, int]] = field(default_factory=set)
+
+    @property
+    def broadcast(self) -> str:
+        """The /24 directed-broadcast address for this gateway's subnet.
+
+        Sending to it instead of the gateway itself reaches every gateway
+        on that subnet, and also lets other S-BUS tools on the LAN hear
+        the traffic (the library's recommended way of addressing the bus).
+        """
+        return ".".join(self.ip.split(".")[:3] + ["255"])
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "ip": self.ip,
+            "broadcast": self.broadcast,
+            "frames": self.frames,
+            "devices": sorted(f"{s}.{d}" for s, d in self.devices),
+        }
+
+
+async def discover_gateways(
+    bus: SmartG4Bus,
+    duration: float = 5.0,
+    probe_interval: float = 1.0,
+) -> list[DiscoveredGateway]:
+    """Find gateways on the LAN without knowing any IP address.
+
+    `bus` should be connected with the limited-broadcast gateway
+    ``255.255.255.255`` (the constructor default) so the probes reach
+    every gateway on the local network. For `duration` seconds a
+    ``0x000E`` scan probe is broadcast every `probe_interval` seconds and
+    the UDP sender address of every genuine module frame that comes back
+    is recorded. Frames from PCs (our own sender, or anything announcing
+    the ``0xFFFE`` virtual type) and undecodable datagrams are ignored, so
+    only hosts that actually relay bus modules count.
+
+    Returns gateways sorted by how many distinct modules were heard
+    through them, most first.
+    """
+    found: dict[str, DiscoveredGateway] = {}
+    local_ip = bus.local_ip
+
+    def record(data: bytes, addr: tuple[str, int]) -> None:
+        try:
+            packet = Packet.decode(data)
+        except ValueError:
+            return
+        if packet.source == bus.sender or packet.source_type == VIRTUAL_DEVICE_TYPE:
+            return
+        ip = addr[0]
+        if ip == local_ip:
+            return
+        entry = found.get(ip)
+        if entry is None:
+            entry = found[ip] = DiscoveredGateway(ip=ip)
+        entry.frames += 1
+        entry.devices.add((packet.source.subnet, packet.source.device))
+
+    unsubscribe = bus.on_raw(record)
+    try:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + duration
+        while True:
+            bus.send(BROADCAST, 0x000E)
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(probe_interval, remaining))
+    finally:
+        unsubscribe()
+
+    return sorted(found.values(), key=lambda g: (-len(g.devices), g.ip))
