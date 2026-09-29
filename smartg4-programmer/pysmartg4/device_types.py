@@ -26,4 +26,13 @@ DEVICE_TYPES: dict[int, str] = {
 
 
 def device_type_name(device_type: int) -> str:
-    return DEVICE_TYPES.get(device_type, f"Unknown (0x{device_type:04X})")
+    """Human name for a device type: live-confirmed table first, then the
+    vendor catalog (397 types from the Smart Cloud database), then hex."""
+    if device_type in DEVICE_TYPES:
+        return DEVICE_TYPES[device_type]
+    from .device_catalog import lookup  # noqa: PLC0415 - avoid import cycle cost
+
+    info = lookup(device_type)
+    if info:
+        return f"{info.model} ({info.description})" if info.description else info.model
+    return f"Unknown (0x{device_type:04X})"
