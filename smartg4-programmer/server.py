@@ -909,6 +909,29 @@ def _function_name(fn: int) -> str:
     return _FUNCTION_NAMES.get(fn, f"0x{fn:02X}")
 
 
+async def api_panel_led_read(request: web.Request) -> web.Response:
+    """READ-ONLY: a panel's current LED + backlight levels (0xE010). Fast.
+
+    Query: target=<subnet.device>. Unlike /api/panel/settings this reads only
+    the LED record, so it returns quickly. Changes nothing on the panel.
+    """
+    app = request.app
+    bus: SmartG4Bus = app["bus"]
+    panel = DeviceAddress.parse(request.query["target"])
+    led = await pc.read_led_level(bus, panel, **_program_source(app, panel))
+    if led is None:
+        return web.json_response(
+            {"ok": False, "error": "the panel did not answer the LED read "
+             "(offline, password-protected, or unsupported firmware)"},
+            status=504,
+        )
+    return web.json_response(
+        {"ok": True, "target": str(panel), "backlight": led.backlight,
+         "led": led.led, "enabled": led.enabled, "params": list(led.params),
+         "wide": led.wide, "raw": led.raw.hex()}
+    )
+
+
 async def api_panel_led(request: web.Request) -> web.Response:
     """Set a panel's LED or backlight intensity live, and store it.
 
@@ -1381,6 +1404,7 @@ def build_app() -> web.Application:
     app.router.add_get("/api/panel/live", api_panel_live)
     app.router.add_get("/api/panel/settings", api_panel_settings)
     app.router.add_post("/api/panel/settings", api_panel_settings_write)
+    app.router.add_get("/api/panel/led", api_panel_led_read)
     app.router.add_post("/api/panel/led", api_panel_led)
     app.router.add_get("/api/monitor", ws_monitor)
     app["devices"] = []
