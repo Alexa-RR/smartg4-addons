@@ -52,7 +52,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .naming import decode_name
+from .naming import decode_name, encode_name
 from .packet import BROADCAST, DeviceAddress, Packet
 from .vendor_cipher import from_vendor_frame, is_vendor_frame, to_vendor_frame
 
@@ -166,6 +166,14 @@ def build_label_read_frame(
     return build_frame(LABEL_READ_OPCODE, bytes([button]), target, **kwargs)
 
 
+def build_label_write_frame(
+    button: int, label: str, target: DeviceAddress, **kwargs: Any
+) -> bytes:
+    """A ``0xE006`` frame setting one key's label (20 bytes, CP1255, padded)."""
+    payload = bytes([button]) + encode_name(label)
+    return build_frame(LABEL_WRITE_OPCODE, payload, target, **kwargs)
+
+
 def build_keymode_read_frame(target: DeviceAddress, **kwargs: Any) -> bytes:
     """A ``0xE008`` frame asking the panel for its per-key mode bytes."""
     return build_frame(KEYMODE_READ_OPCODE, b"", target, **kwargs)
@@ -243,6 +251,7 @@ __all__ = [
     "build_keymode_read_frame",
     "build_keymode_write_frame",
     "build_label_read_frame",
+    "build_label_write_frame",
     "build_read_frame",
     "build_write_frame",
     "parse_response",

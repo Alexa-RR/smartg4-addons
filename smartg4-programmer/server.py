@@ -53,12 +53,14 @@ from pysmartg4.vendor_program import (
     KEYMODE_READ_RESPONSE,
     KEYMODE_WRITE_RESPONSE,
     LABEL_READ_RESPONSE,
+    LABEL_WRITE_RESPONSE,
     READ_RESPONSE,
     WRITE_RESPONSE,
     ButtonFunction,
     build_keymode_read_frame,
     build_keymode_write_frame,
     build_label_read_frame,
+    build_label_write_frame,
     build_read_frame,
     build_write_frame,
     parse_response,
@@ -533,6 +535,32 @@ async def _program_read_label(
     return None if reply is None else reply.get("label", "")
 
 
+async def _program_write_label(
+    app: web.Application, panel: DeviceAddress, button: int, label: str
+) -> bool:
+    """Set one key's label (0xE006) and confirm by reading it back (0xE004).
+
+    The panel acks 0xE006 with 0xE007, but the ack echoes only the key, not
+    the text, so verification is a read-back of the stored label.
+    """
+    src = _program_source(app, panel)
+    await _program_exchange(
+        app,
+        build_label_write_frame(button, label, panel, **src),
+        LABEL_WRITE_RESPONSE,
+        button,
+        panel=panel,
+    )
+    await asyncio.sleep(0.4)
+    stored = await _program_read_label(app, panel, button)
+    ok = stored is not None and stored.strip() == label.strip()
+    _LOGGER.info(
+        "write: %s button %d label %r -> stored %r (%s)",
+        panel, button, label, stored, "ok" if ok else "MISMATCH",
+    )
+    return ok
+
+
 async def _program_prepare_write(
     app: web.Application, panel: DeviceAddress
 ) -> bool:
@@ -602,14 +630,20 @@ async def _program_write_button(
     panel: DeviceAddress,
     button: int,
     commands: list["ButtonCommand"],
+    label: str | None = None,
 ) -> dict:
-    """Write every function entry of one key, capture-free, verifying each.
+    """Write one key capture-free: its label (0xE006) and each function entry.
 
     Each command becomes one (button, page) entry via opcode 0xE002; the entry
-    is read back (0xE000/0xE001) and compared. Returns a per-page report.
+    is read back (0xE000/0xE001) and compared. The label, when given, is
+    written with 0xE006 and read back too. Returns a per-page report plus the
+    label result.
     """
     src = _program_source(app, panel)
     handshake = await _program_prepare_write(app, panel)
+    label_ok: bool | None = None
+    if label is not None:
+        label_ok = await _program_write_label(app, panel, button, label)
     pages = []
     # Pages are 1-based on the wire (every Smart Cloud frame says so); page 1
     # is the only entry ever verified live, so anything beyond it is a
@@ -644,10 +678,13 @@ async def _program_write_button(
             "ack=%s verified=%s",
             panel, button, page, bool(ack), verified,
         )
+    wrote_something = bool(pages) or label_ok is not None
+    entries_ok = all(p["verified"] for p in pages)
     return {
-        "written": bool(pages),
-        "verified": all(p["verified"] for p in pages) and bool(pages),
+        "written": wrote_something,
+        "verified": wrote_something and entries_ok and label_ok is not False,
         "handshake": handshake,
+        "label_verified": label_ok,
         "pages": pages,
     }
 
@@ -873,26 +910,36 @@ async def api_panel_write(request: web.Request) -> web.Response:
     # Preferred path: the vendor's own button-write operation, built from
     # scratch (no capture needed) now that the header cipher is known
     # (pysmartg4.vendor_program). Verifies by reading each entry back.
-    if commands:
+    label = body.get("label")
+    if commands or label is not None:
         if not body.get("confirm"):
             result["method"] = "capture-free"
             result["vendor"] = {"available": True, "capture_free": True}
             return web.json_response(result)
         report = await _program_write_button(
-            app, target, int(body["index"]), commands
+            app, target, int(body["index"]), commands, label=label
         )
         result.update(
             method="capture-free",
             written=report["written"],
             verified=report["verified"],
+            label_verified=report["label_verified"],
             pages=report["pages"],
         )
         if not report["verified"]:
-            result["error"] = (
-                "The panel did not confirm the change — it may be offline, "
-                "protected by a programming password, or on a firmware whose "
-                "button opcode differs. Re-read the panel and try again."
-            )
+            if report["label_verified"] is False and all(
+                p["verified"] for p in report["pages"]
+            ):
+                result["error"] = (
+                    "The commands were written but the label did not stick — "
+                    "the panel may reject that text or be password-protected."
+                )
+            else:
+                result["error"] = (
+                    "The panel did not confirm the change — it may be offline, "
+                    "protected by a programming password, or on a firmware "
+                    "whose button opcode differs. Re-read the panel and retry."
+                )
         return web.json_response(result)
 
     # Fallback: a captured vendor template, if one was learned by watching
